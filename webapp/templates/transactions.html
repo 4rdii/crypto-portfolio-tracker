@@ -1,0 +1,252 @@
+{% extends "base.html" %}
+{% block title %}Transactions · Portfolio{% endblock %}
+
+{% block content %}
+<div class="flex items-center justify-between mb-6">
+  <h2 class="text-2xl font-semibold">Transactions</h2>
+</div>
+
+<div class="card p-5 mb-6">
+  <h3 class="text-sm text-dim mb-3 uppercase">Add transaction</h3>
+  <form id="txForm" class="grid grid-cols-2 md:grid-cols-6 gap-3">
+    <input type="date" name="ts" class="input" required>
+    <select name="tx_type" class="input" required>
+      <option value="buy">Buy</option>
+      <option value="sell">Sell</option>
+      <option value="deposit">Deposit</option>
+      <option value="withdraw">Withdraw</option>
+      <option value="swap">Swap</option>
+    </select>
+    <input type="text"   name="symbol"    class="input" placeholder="Symbol (e.g. ETH)" required>
+    <input type="number" name="amount"    class="input" placeholder="Amount" step="any" required>
+    <input type="number" name="price_usd" class="input" placeholder="Price (USD)" step="any">
+    <button type="submit" class="btn">Add</button>
+    <input type="text" name="notes" class="input md:col-span-6" placeholder="Notes (optional)">
+  </form>
+</div>
+
+<!-- Filter bar: client-side filter of the full transaction list. Applied in
+     loadTxs() after we fetch once, so switching filters is instant and the
+     count reflects the filtered subset. Clear button resets everything. -->
+<div class="card p-4 mb-4">
+  <div class="flex items-center justify-between mb-3">
+    <span class="text-xs text-dim uppercase">Filters</span>
+    <div class="flex items-center gap-3">
+      <span id="filterCount" class="text-xs text-dim"></span>
+      <button class="btn-ghost text-xs" onclick="clearFilters()">Clear all</button>
+    </div>
+  </div>
+  <div class="grid grid-cols-2 md:grid-cols-6 gap-3 items-end">
+    <div>
+      <label class="text-xs text-dim block mb-1">Symbol</label>
+      <input id="fSymbol" class="input" placeholder="Any" oninput="renderTxs()">
+    </div>
+    <div>
+      <label class="text-xs text-dim block mb-1">Wallet</label>
+      <select id="fWallet" class="input" onchange="renderTxs()">
+        <option value="">Any</option>
+      </select>
+    </div>
+    <div>
+      <label class="text-xs text-dim block mb-1">From</label>
+      <input id="fFrom" type="date" class="input" onchange="renderTxs()">
+    </div>
+    <div>
+      <label class="text-xs text-dim block mb-1">To</label>
+      <input id="fTo" type="date" class="input" onchange="renderTxs()">
+    </div>
+    <div>
+      <label class="text-xs text-dim block mb-1">Min $</label>
+      <input id="fMin" type="number" step="any" class="input" placeholder="0" oninput="renderTxs()">
+    </div>
+    <div>
+      <label class="text-xs text-dim block mb-1">Search notes</label>
+      <input id="fNotes" class="input" placeholder="substring" oninput="renderTxs()">
+    </div>
+  </div>
+  <!-- Type chips: click to toggle. Starts with all types on. -->
+  <div class="flex items-center gap-2 mt-3 flex-wrap">
+    <span class="text-xs text-dim mr-2">Types:</span>
+    <div id="fTypes" class="flex gap-2 flex-wrap"></div>
+  </div>
+</div>
+
+<div class="card overflow-hidden">
+  <table>
+    <thead>
+      <tr>
+        <th>Date</th>
+        <th>Type</th>
+        <th>Symbol</th>
+        <th class="text-right">Amount</th>
+        <th class="text-right">Price</th>
+        <th class="text-right">Total</th>
+        <th>Wallet</th>
+        <th>Notes</th>
+        <th></th>
+      </tr>
+    </thead>
+    <tbody id="txRows"><tr><td colspan="9" class="text-dim text-center py-8">Loading...</td></tr></tbody>
+  </table>
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script>
+// Full unfiltered tx list — fetched once, filtered client-side so every
+// filter change is instant (no round trip). Re-fetched after add/delete.
+let _allTxs = [];
+let _wallets = [];
+// Active tx-type set. Tracks which type chips are "on"; starts with all on.
+const ALL_TYPES = ['buy','sell','deposit','withdraw','swap'];
+let _activeTypes = new Set(ALL_TYPES);
+
+const typeColor = { buy:'#10b981', deposit:'#10b981', sell:'#ef4444', withdraw:'#ef4444', swap:'#f59e0b' };
+
+async function loadTxs() {
+  // Fetch transactions + wallets in parallel (wallets populate the filter dropdown)
+  const [txs, wallets] = await Promise.all([
+    fetch('/api/transactions').then(r => r.json()),
+    fetch('/api/wallets').then(r => r.json()),
+  ]);
+  _allTxs = txs;
+  _wallets = wallets;
+
+  // Populate wallet dropdown once per load
+  const wSel = document.getElementById('fWallet');
+  const current = wSel.value;
+  wSel.innerHTML = '<option value="">Any</option>' +
+    wallets.map(w => `<option value="${Number(w.id)}">${esc(w.label)}</option>`).join('');
+  wSel.value = current;
+
+  renderTypeChips();
+  renderTxs();
+}
+
+function renderTypeChips() {
+  const host = document.getElementById('fTypes');
+  host.innerHTML = ALL_TYPES.map(t => {
+    const on = _activeTypes.has(t);
+    const c = typeColor[t];
+    const bg = on ? c + '22' : '#14161c';
+    const fg = on ? c : '#5a6070';
+    const border = on ? c : '#2a2e38';
+    return `<button class="pill" onclick="toggleType('${t}')" style="background:${bg};color:${fg};cursor:pointer;border:1px solid ${border};font-size:11px">${t}</button>`;
+  }).join('');
+}
+
+function toggleType(t) {
+  if (_activeTypes.has(t)) _activeTypes.delete(t);
+  else _activeTypes.add(t);
+  renderTypeChips();
+  renderTxs();
+}
+
+function clearFilters() {
+  document.getElementById('fSymbol').value = '';
+  document.getElementById('fWallet').value = '';
+  document.getElementById('fFrom').value = '';
+  document.getElementById('fTo').value = '';
+  document.getElementById('fMin').value = '';
+  document.getElementById('fNotes').value = '';
+  _activeTypes = new Set(ALL_TYPES);
+  renderTypeChips();
+  renderTxs();
+}
+
+function renderTxs() {
+  // Pull current filter values
+  const sym = (document.getElementById('fSymbol').value || '').trim().toUpperCase();
+  const walletId = document.getElementById('fWallet').value;
+  const from = document.getElementById('fFrom').value;  // yyyy-mm-dd
+  const to   = document.getElementById('fTo').value;
+  const minV = parseFloat(document.getElementById('fMin').value || '0') || 0;
+  const notes = (document.getElementById('fNotes').value || '').trim().toLowerCase();
+
+  // Apply filters — any empty filter is a no-op, so "all fields empty" means
+  // show everything (sans type chips which default to all-on anyway).
+  const filtered = _allTxs.filter(t => {
+    if (!_activeTypes.has(t.tx_type)) return false;
+    if (sym && !(t.symbol || '').toUpperCase().includes(sym)) return false;
+    if (walletId && String(t.wallet_id || '') !== walletId) return false;
+    const d = (t.ts || '').slice(0,10);
+    if (from && d < from) return false;
+    if (to && d > to) return false;
+    if (minV > 0 && Math.abs(t.total_usd || 0) < minV) return false;
+    if (notes && !((t.notes || '').toLowerCase().includes(notes))) return false;
+    return true;
+  });
+
+  // Counter text — helps the user understand how aggressively their filters bit
+  document.getElementById('filterCount').textContent =
+    filtered.length === _allTxs.length
+      ? `${_allTxs.length} transactions`
+      : `${filtered.length} of ${_allTxs.length} transactions`;
+
+  if (!filtered.length) {
+    document.getElementById('txRows').innerHTML = _allTxs.length
+      ? '<tr><td colspan="9" class="text-dim text-center py-10">No transactions match the current filters. <a href="#" onclick="clearFilters();return false" class="text-accent">Clear filters</a></td></tr>'
+      : '<tr><td colspan="9" class="text-dim text-center py-10">No transactions yet. Log your first trade above.</td></tr>';
+    return;
+  }
+
+  document.getElementById('txRows').innerHTML = filtered.map(t => {
+    const walletLabel = t.wallet_label || (t.wallet_id ? `Wallet #${t.wallet_id}` : '');
+    // Only the typeColor keys go into a style attribute unescaped — they
+    // come from a hardcoded whitelist below, so they're safe. Everything
+    // else user-supplied (symbol, notes, wallet label) must be escaped.
+    const colorKey = ['buy','sell','deposit','withdraw','swap'].includes(t.tx_type) ? t.tx_type : 'deposit';
+    const color = typeColor[colorKey];
+    const noteFull = t.notes || '';
+    const noteShort = noteFull.slice(0, 40) + (noteFull.length > 40 ? '…' : '');
+    return `
+    <tr>
+      <td class="num">${esc((t.ts || '').slice(0,10))}</td>
+      <td><span class="pill" style="background:${color}22;color:${color}">${esc(t.tx_type)}</span></td>
+      <td class="font-medium">${esc(t.symbol)}</td>
+      <td class="text-right num">${fmtNum(t.amount)}</td>
+      <td class="text-right num">${t.price_usd ? fmtUSD(t.price_usd) : '—'}</td>
+      <td class="text-right num font-medium">${fmtUSD(t.total_usd)}</td>
+      <td class="text-xs text-dim">${esc(walletLabel)}</td>
+      <td class="text-dim text-xs" title="${esc(noteFull)}">${esc(noteShort)}</td>
+      <td class="text-right"><button class="btn-danger" onclick="delTx(${Number(t.id)})">×</button></td>
+    </tr>`;
+  }).join('');
+}
+
+document.getElementById('txForm').addEventListener('submit', async (e) => {
+  e.preventDefault();
+  const fd = new FormData(e.target);
+  const body = {
+    ts: fd.get('ts'),
+    tx_type: fd.get('tx_type'),
+    symbol: fd.get('symbol'),
+    amount: parseFloat(fd.get('amount')),
+    price_usd: parseFloat(fd.get('price_usd') || 0),
+    notes: fd.get('notes') || null,
+  };
+  const r = await fetch('/api/transactions', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(body)
+  });
+  if (r.ok) {
+    e.target.reset();
+    loadTxs();
+  } else {
+    const err = await r.json();
+    alert(err.detail || 'Failed');
+  }
+});
+
+async function delTx(id) {
+  if (!confirm('Delete this transaction?')) return;
+  await fetch('/api/transactions/' + id, { method: 'DELETE' });
+  loadTxs();
+}
+
+// Default date = today
+document.querySelector('input[name=ts]').value = new Date().toISOString().slice(0,10);
+loadTxs();
+</script>
+{% endblock %}

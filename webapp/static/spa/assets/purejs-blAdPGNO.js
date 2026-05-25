@@ -1,0 +1,1 @@
+import{c7 as r,c3 as s,c8 as o}from"./index-Mp95ccTx.js";const y=async e=>{const c=r.getPublicKey(e.privateKey,!0),t=s(c);if(t!=e.publicKey)throw new Error(`Bad API key. Expected to get public key ${e.publicKey}, got ${t}`);const i=o().update(e.content).digest();return r.sign(i,e.privateKey).toDERHex()};export{y as signWithApiKey};

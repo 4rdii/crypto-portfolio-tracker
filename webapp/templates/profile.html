@@ -1,0 +1,77 @@
+{% extends "base.html" %}
+{% block title %}Profile · Portfolio{% endblock %}
+
+{% block content %}
+<div class="max-w-2xl mx-auto">
+  <h2 class="text-2xl font-semibold mb-6">Profile</h2>
+
+  <div class="card p-6 mb-6">
+    <h3 class="text-sm text-dim uppercase mb-4">Identity</h3>
+    <div id="profileInfo" class="text-dim">Loading…</div>
+  </div>
+
+  <div class="card p-6 mb-6">
+    <div class="flex items-center justify-between mb-4">
+      <h3 class="text-sm text-dim uppercase">Linked wallets</h3>
+      <a href="/wallets" class="text-xs text-accent hover:underline">Manage →</a>
+    </div>
+    <div id="linkedWallets" class="text-dim text-sm">Loading…</div>
+  </div>
+
+  <div class="card p-6">
+    <h3 class="text-sm text-dim uppercase mb-4">Session</h3>
+    <button onclick="logout()" class="btn-danger">Sign out</button>
+  </div>
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script>
+async function loadProfile() {
+  const me = await fetch('/api/auth/me').then(r => r.ok ? r.json() : null);
+  if (!me) { window.location = '/'; return; }
+  const u = me.user;
+  const created = new Date(u.created_at + 'Z').toLocaleDateString();
+  const lastLogin = u.last_login_at ? new Date(u.last_login_at + 'Z').toLocaleString() : 'never';
+  document.getElementById('profileInfo').innerHTML = `
+    <div class="grid grid-cols-2 gap-4 text-sm">
+      <div>
+        <div class="text-xs text-dim uppercase mb-1">Primary address</div>
+        <div class="font-mono text-ink text-xs break-all">${u.primary_address}</div>
+      </div>
+      <div>
+        <div class="text-xs text-dim uppercase mb-1">Chain type</div>
+        <div class="text-ink">${u.chain_type.toUpperCase()}</div>
+      </div>
+      <div>
+        <div class="text-xs text-dim uppercase mb-1">Member since</div>
+        <div class="text-ink">${created}</div>
+      </div>
+      <div>
+        <div class="text-xs text-dim uppercase mb-1">Last login</div>
+        <div class="text-ink text-xs">${lastLogin}</div>
+      </div>
+    </div>
+  `;
+  const ws = await fetch('/api/wallets').then(r => r.json());
+  if (!ws.length) {
+    document.getElementById('linkedWallets').innerHTML =
+      '<div class="text-dim">No wallets linked. <a href="/wallets" class="text-accent">Link one →</a></div>';
+    return;
+  }
+  document.getElementById('linkedWallets').innerHTML = ws.map(w => `
+    <div class="flex items-center justify-between py-2 border-b border-line last:border-0">
+      <div>
+        <div class="font-medium">${w.label}</div>
+        <div class="text-xs text-dim font-mono">${w.address.slice(0, 10)}…${w.address.slice(-8)}</div>
+      </div>
+      <div class="text-right">
+        <span class="pill">${w.chain}</span>
+        ${w.verified ? '<span class="pill" style="background:#0d2818;color:#10b981">signed</span>' : '<span class="pill">unverified</span>'}
+      </div>
+    </div>
+  `).join('');
+}
+loadProfile();
+</script>
+{% endblock %}

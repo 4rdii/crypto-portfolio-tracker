@@ -1,0 +1,40 @@
+# Secrets — never commit
+.env
+.env.*
+!.env.example
+*.env.sops
+
+# Python
+__pycache__/
+*.py[cod]
+*.pyo
+*.pyd
+.Python
+*.egg-info/
+dist/
+build/
+.venv/
+venv/
+.mypy_cache/
+
+# Database (runtime data)
+webapp/portfolio.db
+webapp/portfolio.db-wal
+webapp/portfolio.db-shm
+webapp/logs/
+
+# Node / frontend build
+webapp/ui/node_modules/
+webapp/ui/dist/
+webapp/ui/.vercel/
+
+# Vercel
+.vercel/
+
+# Misc
+*.log
+sync_daemon.log
+.DS_Store
+.idea/
+.vscode/
+webapp/.session_secret

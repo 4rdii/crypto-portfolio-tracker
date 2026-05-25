@@ -1,0 +1,136 @@
+<!doctype html>
+<html lang="en" class="dark">
+<head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>{% block title %}Portfolio Tracker{% endblock %}</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.1/dist/chart.umd.min.js"></script>
+    <!-- ethers v6 UMD for EVM wallet signing (SIWE flow) -->
+    <script src="https://cdn.jsdelivr.net/npm/ethers@6.13.4/dist/ethers.umd.min.js"></script>
+    <!-- bs58 for Solana signature encoding/decoding -->
+    <script src="https://cdn.jsdelivr.net/npm/bs58@6.0.0/+esm" type="module"></script>
+    <script>
+      tailwind.config = {
+        darkMode: 'class',
+        theme: {
+          extend: {
+            colors: {
+              bg: '#0b0d12',
+              panel: '#12151c',
+              card: '#171a23',
+              line: '#242834',
+              ink: '#e6e8ef',
+              dim: '#8b92a5',
+              accent: '#6366f1',
+              green: '#10b981',
+              red: '#ef4444',
+            }
+          }
+        }
+      }
+    </script>
+    <style>
+      body { background: #0b0d12; color: #e6e8ef; font-family: -apple-system, BlinkMacSystemFont, "Inter", "Segoe UI", sans-serif; }
+      .card { background: #12151c; border: 1px solid #242834; border-radius: 14px; }
+      .btn { background: #6366f1; color: white; padding: 8px 14px; border-radius: 8px; font-weight: 500; transition: all .15s; }
+      .btn:hover { background: #4f46e5; }
+      .btn-ghost { background: #1f2330; color: #e6e8ef; padding: 8px 14px; border-radius: 8px; border: 1px solid #2a2f3d; }
+      .btn-ghost:hover { background: #262b3a; }
+      .btn-danger { background: #3a1d1d; color: #fca5a5; padding: 6px 10px; border-radius: 6px; border: 1px solid #5b2525; font-size: 12px; }
+      .btn-danger:hover { background: #4a2525; }
+      .input { background: #0f1218; border: 1px solid #2a2f3d; color: #e6e8ef; padding: 8px 12px; border-radius: 8px; outline: none; }
+      .input:focus { border-color: #6366f1; }
+      .nav a { color: #8b92a5; padding: 10px 14px; border-radius: 8px; font-weight: 500; }
+      .nav a:hover { color: #e6e8ef; background: #171a23; }
+      .nav a.active { color: #e6e8ef; background: #171a23; }
+      table { width: 100%; border-collapse: collapse; }
+      th { text-align: left; color: #8b92a5; font-weight: 500; font-size: 12px; text-transform: uppercase; padding: 12px 10px; border-bottom: 1px solid #242834; }
+      td { padding: 14px 10px; border-bottom: 1px solid #1c2029; font-size: 14px; }
+      tr:hover td { background: #14171f; }
+      .pos { color: #10b981; }
+      .neg { color: #ef4444; }
+      .pill { font-size: 11px; padding: 2px 8px; border-radius: 999px; background: #1f2330; color: #8b92a5; }
+      .num { font-variant-numeric: tabular-nums; }
+    </style>
+</head>
+<body>
+<div class="max-w-7xl mx-auto px-6 py-6">
+  <header class="flex items-center justify-between mb-8">
+    <div class="flex items-center gap-3">
+      <div class="w-9 h-9 rounded-lg bg-accent flex items-center justify-center font-bold">◆</div>
+      <h1 class="text-xl font-semibold">Portfolio</h1>
+    </div>
+    <nav class="nav flex gap-1">
+      <a href="/dashboard"    class="{% if page == 'dashboard'    %}active{% endif %}">Dashboard</a>
+      <a href="/holdings"     class="{% if page == 'holdings'     %}active{% endif %}">Holdings</a>
+      <a href="/transactions" class="{% if page == 'transactions' %}active{% endif %}">Transactions</a>
+      <a href="/wallets"      class="{% if page == 'wallets'      %}active{% endif %}">Wallets</a>
+      <a href="/billing"      class="{% if page == 'billing'      %}active{% endif %}">Billing</a>
+      <a href="/fund"         class="{% if page == 'fund'         %}active{% endif %}">Fund</a>
+    </nav>
+    <div id="profileCorner" class="text-sm"></div>
+  </header>
+
+  <main>
+    {% block content %}{% endblock %}
+  </main>
+</div>
+
+<script src="/static/app.js?v={{ static_version }}"></script>
+<script src="/static/wallet-auth.js?v={{ static_version }}"></script>
+<script>
+  // Client-side auth guard: on every protected page, check if the session is
+  // valid. If not, redirect to the sign-in landing page. Also populates the
+  // profile corner in the top-right.
+  (async function authGuard() {
+    const page = {{ (page or '') | tojson }};
+    try {
+      const r = await fetch('/api/auth/me');
+      if (!r.ok) {
+        if (page !== 'landing') window.location = '/';
+        return;
+      }
+      const me = await r.json();
+      const addr = me.user.primary_address;
+      const short = addr.length > 12 ? addr.slice(0, 6) + '…' + addr.slice(-4) : addr;
+      const corner = document.getElementById('profileCorner');
+      if (corner) {
+        corner.innerHTML = `
+          <div class="relative inline-block">
+            <button onclick="toggleProfileMenu()" class="btn-ghost text-xs flex items-center gap-2">
+              <span class="w-2 h-2 rounded-full bg-green inline-block"></span>
+              <span class="num">${short}</span>
+              <span class="text-dim">▾</span>
+            </button>
+            <div id="profileMenu" class="hidden absolute right-0 mt-2 w-56 card p-2 z-50" style="min-width: 220px;">
+              <div class="px-3 py-2 text-xs text-dim">${me.user.chain_type.toUpperCase()} · ${me.wallet_count} wallet${me.wallet_count === 1 ? '' : 's'}</div>
+              <a href="/profile" class="block px-3 py-2 rounded hover:bg-line text-sm">Profile</a>
+              <a href="/wallets" class="block px-3 py-2 rounded hover:bg-line text-sm">Manage wallets</a>
+              <button onclick="logout()" class="block w-full text-left px-3 py-2 rounded hover:bg-line text-sm text-red">Sign out</button>
+            </div>
+          </div>`;
+      }
+    } catch (e) {
+      if (page !== 'landing') window.location = '/';
+    }
+  })();
+
+  function toggleProfileMenu() {
+    const m = document.getElementById('profileMenu');
+    if (m) m.classList.toggle('hidden');
+  }
+  async function logout() {
+    await fetch('/api/auth/logout', { method: 'POST' });
+    window.location = '/';
+  }
+  // Close the profile menu on outside click
+  document.addEventListener('click', (e) => {
+    const menu = document.getElementById('profileMenu');
+    if (!menu || menu.classList.contains('hidden')) return;
+    if (!e.target.closest('#profileCorner')) menu.classList.add('hidden');
+  });
+</script>
+{% block scripts %}{% endblock %}
+</body>
+</html>

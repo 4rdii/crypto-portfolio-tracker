@@ -1,0 +1,9 @@
+{
+  "buildCommand": "vite build --outDir dist",
+  "outputDirectory": "dist",
+  "framework": "vite",
+  "rewrites": [
+    { "source": "/api/:path*", "destination": "https://portfolio.debazaar.click/api/:path*" },
+    { "source": "/:path*", "destination": "/index.html" }
+  ]
+}

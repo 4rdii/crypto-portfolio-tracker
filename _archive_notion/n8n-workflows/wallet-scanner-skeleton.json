@@ -1,0 +1,384 @@
+{
+  "name": "Crypto Wallet Balance Scanner",
+  "nodes": [
+    {
+      "parameters": {},
+      "id": "trigger-manual",
+      "name": "Manual Trigger",
+      "type": "n8n-nodes-base.manualTrigger",
+      "typeVersion": 1,
+      "position": [200, 300]
+    },
+    {
+      "parameters": {
+        "assignments": {
+          "assignments": [
+            {
+              "id": "addr",
+              "name": "address",
+              "value": "0x28c6c06298d514db089934071355e5743bf21d60",
+              "type": "string"
+            },
+            {
+              "id": "label",
+              "name": "wallet_label",
+              "value": "Test Wallet",
+              "type": "string"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "id": "set-input",
+      "name": "Input: Address",
+      "type": "n8n-nodes-base.set",
+      "typeVersion": 3.4,
+      "position": [420, 300]
+    },
+    {
+      "parameters": {
+        "language": "javaScript",
+        "jsCode": "// Chain detection by address format\nconst address = $input.first().json.address.trim();\nlet chain = 'unknown';\n\nif (/^0x[a-fA-F0-9]{40}$/.test(address)) {\n  chain = 'evm';\n} else if (/^[1-9A-HJ-NP-Za-km-z]{32,44}$/.test(address) && !address.startsWith('0x')) {\n  // Solana base58 (32-44 chars, no 0 O I l)\n  chain = 'solana';\n} else if (/^(bc1|[13])[a-zA-HJ-NP-Z0-9]{25,62}$/.test(address)) {\n  chain = 'bitcoin';\n}\n\nreturn [{\n  json: {\n    address,\n    chain,\n    wallet_label: $input.first().json.wallet_label,\n    scanned_at: new Date().toISOString()\n  }\n}];"
+      },
+      "id": "detect-chain",
+      "name": "Detect Chain",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [640, 300]
+    },
+    {
+      "parameters": {
+        "rules": {
+          "values": [
+            {
+              "conditions": {
+                "options": {
+                  "caseSensitive": true,
+                  "leftValue": "",
+                  "typeValidation": "loose"
+                },
+                "conditions": [
+                  {
+                    "id": "c-evm",
+                    "leftValue": "={{ $json.chain }}",
+                    "rightValue": "evm",
+                    "operator": {
+                      "type": "string",
+                      "operation": "equals"
+                    }
+                  }
+                ],
+                "combinator": "and"
+              },
+              "renameOutput": true,
+              "outputKey": "EVM"
+            },
+            {
+              "conditions": {
+                "options": {
+                  "caseSensitive": true,
+                  "leftValue": "",
+                  "typeValidation": "loose"
+                },
+                "conditions": [
+                  {
+                    "id": "c-sol",
+                    "leftValue": "={{ $json.chain }}",
+                    "rightValue": "solana",
+                    "operator": {
+                      "type": "string",
+                      "operation": "equals"
+                    }
+                  }
+                ],
+                "combinator": "and"
+              },
+              "renameOutput": true,
+              "outputKey": "Solana"
+            },
+            {
+              "conditions": {
+                "options": {
+                  "caseSensitive": true,
+                  "leftValue": "",
+                  "typeValidation": "loose"
+                },
+                "conditions": [
+                  {
+                    "id": "c-btc",
+                    "leftValue": "={{ $json.chain }}",
+                    "rightValue": "bitcoin",
+                    "operator": {
+                      "type": "string",
+                      "operation": "equals"
+                    }
+                  }
+                ],
+                "combinator": "and"
+              },
+              "renameOutput": true,
+              "outputKey": "Bitcoin"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "id": "route-chain",
+      "name": "Route by Chain",
+      "type": "n8n-nodes-base.switch",
+      "typeVersion": 3.2,
+      "position": [860, 300]
+    },
+    {
+      "parameters": {
+        "method": "GET",
+        "url": "=https://deep-index.moralis.io/api/v2.2/wallets/{{ $json.address }}/tokens",
+        "sendQuery": true,
+        "queryParameters": {
+          "parameters": [
+            {
+              "name": "chains",
+              "value": "eth,polygon,bsc,arbitrum,optimism,base"
+            },
+            {
+              "name": "exclude_spam",
+              "value": "true"
+            }
+          ]
+        },
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "X-API-Key",
+              "value": "={{ $env.MORALIS_API_KEY }}"
+            },
+            {
+              "name": "accept",
+              "value": "application/json"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "id": "moralis-balances",
+      "name": "Moralis: EVM Balances",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [1080, 140]
+    },
+    {
+      "parameters": {
+        "method": "GET",
+        "url": "=https://mainnet.helius-rpc.com/?api-key={{ $env.HELIUS_API_KEY }}",
+        "sendBody": true,
+        "contentType": "json",
+        "bodyParameters": {
+          "parameters": []
+        },
+        "jsonBody": "={\n  \"jsonrpc\": \"2.0\",\n  \"id\": 1,\n  \"method\": \"searchAssets\",\n  \"params\": {\n    \"ownerAddress\": \"{{ $json.address }}\",\n    \"tokenType\": \"fungible\",\n    \"displayOptions\": { \"showZeroBalance\": false }\n  }\n}",
+        "options": {}
+      },
+      "id": "helius-balances",
+      "name": "Helius: Solana Balances",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [1080, 300]
+    },
+    {
+      "parameters": {
+        "method": "GET",
+        "url": "=https://mempool.space/api/address/{{ $json.address }}",
+        "options": {}
+      },
+      "id": "mempool-balance",
+      "name": "mempool.space: BTC Balance",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [1080, 460]
+    },
+    {
+      "parameters": {
+        "language": "javaScript",
+        "jsCode": "// Normalize Moralis EVM response to unified Holdings format\nconst items = $input.all();\nconst results = [];\n\nfor (const item of items) {\n  const tokens = item.json.result || item.json || [];\n  const walletLabel = $('Detect Chain').first().json.wallet_label;\n  const walletAddr = $('Detect Chain').first().json.address;\n\n  for (const t of tokens) {\n    const balance = parseFloat(t.balance_formatted || (parseInt(t.balance || '0') / Math.pow(10, t.decimals || 18)));\n    const price = parseFloat(t.usd_price || 0);\n    const value = balance * price;\n\n    // Skip dust\n    if (value < 1 && !t.native_token) continue;\n\n    results.push({\n      json: {\n        wallet_label: walletLabel,\n        wallet_address: walletAddr,\n        chain: t.chain || 'eth',\n        token_symbol: t.symbol,\n        token_name: t.name,\n        contract: t.token_address || 'native',\n        balance: balance,\n        decimals: t.decimals,\n        usd_price: price,\n        usd_value: value,\n        logo: t.logo || null,\n        native: !!t.native_token,\n        scanned_at: new Date().toISOString()\n      }\n    });\n  }\n}\n\nreturn results;"
+      },
+      "id": "normalize-evm",
+      "name": "Normalize EVM",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [1300, 140]
+    },
+    {
+      "parameters": {
+        "language": "javaScript",
+        "jsCode": "// Normalize Helius Solana response to unified Holdings format\nconst data = $input.first().json;\nconst items = data.result?.items || [];\nconst walletLabel = $('Detect Chain').first().json.wallet_label;\nconst walletAddr = $('Detect Chain').first().json.address;\nconst results = [];\n\nfor (const t of items) {\n  const info = t.token_info || {};\n  const balance = parseFloat(info.balance || 0) / Math.pow(10, info.decimals || 0);\n  const price = parseFloat(info.price_info?.price_per_token || 0);\n  const value = balance * price;\n\n  if (value < 1) continue;\n\n  results.push({\n    json: {\n      wallet_label: walletLabel,\n      wallet_address: walletAddr,\n      chain: 'solana',\n      token_symbol: info.symbol || t.content?.metadata?.symbol || '?',\n      token_name: t.content?.metadata?.name || info.symbol || '?',\n      contract: t.id,\n      balance: balance,\n      decimals: info.decimals,\n      usd_price: price,\n      usd_value: value,\n      logo: t.content?.links?.image || null,\n      native: false,\n      scanned_at: new Date().toISOString()\n    }\n  });\n}\n\nreturn results;"
+      },
+      "id": "normalize-sol",
+      "name": "Normalize Solana",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [1300, 300]
+    },
+    {
+      "parameters": {
+        "language": "javaScript",
+        "jsCode": "// Normalize mempool.space BTC response; fetch BTC price separately from CoinGecko\nconst data = $input.first().json;\nconst walletLabel = $('Detect Chain').first().json.wallet_label;\nconst walletAddr = $('Detect Chain').first().json.address;\n\nconst funded = (data.chain_stats?.funded_txo_sum || 0);\nconst spent = (data.chain_stats?.spent_txo_sum || 0);\nconst balanceSats = funded - spent;\nconst balanceBTC = balanceSats / 1e8;\n\n// We'll fetch BTC price in a subsequent node and multiply\nreturn [{\n  json: {\n    wallet_label: walletLabel,\n    wallet_address: walletAddr,\n    chain: 'bitcoin',\n    token_symbol: 'BTC',\n    token_name: 'Bitcoin',\n    contract: 'native',\n    balance: balanceBTC,\n    decimals: 8,\n    balance_sats: balanceSats,\n    native: true,\n    scanned_at: new Date().toISOString(),\n    _needs_price: true\n  }\n}];"
+      },
+      "id": "normalize-btc",
+      "name": "Normalize BTC",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [1300, 460]
+    },
+    {
+      "parameters": {
+        "method": "GET",
+        "url": "https://api.coingecko.com/api/v3/simple/price",
+        "sendQuery": true,
+        "queryParameters": {
+          "parameters": [
+            {
+              "name": "ids",
+              "value": "bitcoin"
+            },
+            {
+              "name": "vs_currencies",
+              "value": "usd"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "id": "btc-price",
+      "name": "CoinGecko: BTC Price",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [1520, 460]
+    },
+    {
+      "parameters": {
+        "language": "javaScript",
+        "jsCode": "// Attach BTC price to the BTC item\nconst price = $input.first().json.bitcoin?.usd || 0;\nconst btcItem = $('Normalize BTC').first().json;\n\nreturn [{\n  json: {\n    ...btcItem,\n    usd_price: price,\n    usd_value: btcItem.balance * price,\n    _needs_price: undefined\n  }\n}];"
+      },
+      "id": "apply-btc-price",
+      "name": "Apply BTC Price",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [1740, 460]
+    },
+    {
+      "parameters": {
+        "mode": "chooseBranch",
+        "options": {}
+      },
+      "id": "merge-all",
+      "name": "Merge All Holdings",
+      "type": "n8n-nodes-base.merge",
+      "typeVersion": 3.1,
+      "position": [1960, 300]
+    },
+    {
+      "parameters": {
+        "resource": "databasePage",
+        "operation": "create",
+        "databaseId": "={{ $env.NOTION_HOLDINGS_DB_ID }}",
+        "propertiesUi": {
+          "propertyValues": [
+            {
+              "key": "Name|title",
+              "title": "={{ $json.token_symbol }} ({{ $json.wallet_label }})"
+            },
+            {
+              "key": "Symbol|rich_text",
+              "textContent": "={{ $json.token_symbol }}"
+            },
+            {
+              "key": "Chain|select",
+              "selectValue": "={{ $json.chain }}"
+            },
+            {
+              "key": "Wallet|rich_text",
+              "textContent": "={{ $json.wallet_label }}"
+            },
+            {
+              "key": "Contract|rich_text",
+              "textContent": "={{ $json.contract }}"
+            },
+            {
+              "key": "Balance|number",
+              "numberValue": "={{ $json.balance }}"
+            },
+            {
+              "key": "USD Price|number",
+              "numberValue": "={{ $json.usd_price }}"
+            },
+            {
+              "key": "USD Value|number",
+              "numberValue": "={{ $json.usd_value }}"
+            },
+            {
+              "key": "Last Updated|date",
+              "date": "={{ $json.scanned_at }}"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "id": "notion-upsert",
+      "name": "Notion: Upsert Holdings",
+      "type": "n8n-nodes-base.notion",
+      "typeVersion": 2.2,
+      "position": [2180, 300]
+    }
+  ],
+  "connections": {
+    "Manual Trigger": {
+      "main": [[{ "node": "Input: Address", "type": "main", "index": 0 }]]
+    },
+    "Input: Address": {
+      "main": [[{ "node": "Detect Chain", "type": "main", "index": 0 }]]
+    },
+    "Detect Chain": {
+      "main": [[{ "node": "Route by Chain", "type": "main", "index": 0 }]]
+    },
+    "Route by Chain": {
+      "main": [
+        [{ "node": "Moralis: EVM Balances", "type": "main", "index": 0 }],
+        [{ "node": "Helius: Solana Balances", "type": "main", "index": 0 }],
+        [{ "node": "mempool.space: BTC Balance", "type": "main", "index": 0 }]
+      ]
+    },
+    "Moralis: EVM Balances": {
+      "main": [[{ "node": "Normalize EVM", "type": "main", "index": 0 }]]
+    },
+    "Helius: Solana Balances": {
+      "main": [[{ "node": "Normalize Solana", "type": "main", "index": 0 }]]
+    },
+    "mempool.space: BTC Balance": {
+      "main": [[{ "node": "Normalize BTC", "type": "main", "index": 0 }]]
+    },
+    "Normalize BTC": {
+      "main": [[{ "node": "CoinGecko: BTC Price", "type": "main", "index": 0 }]]
+    },
+    "CoinGecko: BTC Price": {
+      "main": [[{ "node": "Apply BTC Price", "type": "main", "index": 0 }]]
+    },
+    "Normalize EVM": {
+      "main": [[{ "node": "Merge All Holdings", "type": "main", "index": 0 }]]
+    },
+    "Normalize Solana": {
+      "main": [[{ "node": "Merge All Holdings", "type": "main", "index": 1 }]]
+    },
+    "Apply BTC Price": {
+      "main": [[{ "node": "Merge All Holdings", "type": "main", "index": 2 }]]
+    },
+    "Merge All Holdings": {
+      "main": [[{ "node": "Notion: Upsert Holdings", "type": "main", "index": 0 }]]
+    }
+  },
+  "settings": {
+    "executionOrder": "v1"
+  },
+  "tags": ["crypto", "wallet-scanner", "multi-chain"],
+  "versionId": "0.1.0"
+}

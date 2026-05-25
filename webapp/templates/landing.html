@@ -1,0 +1,62 @@
+{% extends "base.html" %}
+{% block title %}Sign in · Portfolio Tracker{% endblock %}
+
+{% block content %}
+<div class="max-w-xl mx-auto mt-16">
+  <div class="text-center mb-10">
+    <div class="inline-flex items-center justify-center w-14 h-14 rounded-2xl bg-accent text-2xl font-bold mb-4">◆</div>
+    <h2 class="text-3xl font-semibold mb-2">Portfolio Tracker</h2>
+    <p class="text-dim">Sign in with your wallet to start tracking your holdings, P&amp;L, and transaction history.</p>
+  </div>
+
+  <div class="card p-6">
+    <h3 class="text-sm text-dim uppercase mb-4">Connect wallet</h3>
+
+    <button onclick="signIn('evm')" class="w-full flex items-center justify-between gap-3 px-4 py-3 rounded-lg bg-line hover:bg-panel border border-line transition mb-3">
+      <div class="flex items-center gap-3">
+        <span class="w-10 h-10 rounded-lg bg-orange-500/20 flex items-center justify-center text-orange-400">🦊</span>
+        <div class="text-left">
+          <div class="font-medium">Ethereum / EVM wallet</div>
+          <div class="text-xs text-dim">MetaMask, Rabby, Coinbase, Rainbow, Brave, Trust…</div>
+        </div>
+      </div>
+      <span class="text-dim">→</span>
+    </button>
+
+    <button onclick="signIn('solana')" class="w-full flex items-center justify-between gap-3 px-4 py-3 rounded-lg bg-line hover:bg-panel border border-line transition mb-3">
+      <div class="flex items-center gap-3">
+        <span class="w-10 h-10 rounded-lg bg-purple-500/20 flex items-center justify-center text-purple-300">◎</span>
+        <div class="text-left">
+          <div class="font-medium">Solana wallet</div>
+          <div class="text-xs text-dim">Phantom, Solflare, Backpack</div>
+        </div>
+      </div>
+      <span class="text-dim">→</span>
+    </button>
+
+    <div id="signinStatus" class="text-xs text-dim mt-4 min-h-[1em]"></div>
+  </div>
+
+  <div class="text-xs text-dim text-center mt-6 leading-relaxed">
+    Signing in only asks your wallet for a signature — we never request transaction approval, funds transfer, or token permissions.<br>
+    <span class="text-dim">The signature proves you own the address. That's all.</span>
+  </div>
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script>
+async function signIn(kind) {
+  const status = document.getElementById('signinStatus');
+  status.textContent = 'Opening wallet…';
+  status.className = 'text-xs text-dim mt-4 min-h-[1em]';
+  try {
+    if (kind === 'evm') await window.signInWithEthereum();
+    else if (kind === 'solana') await window.signInWithSolana();
+  } catch (e) {
+    status.textContent = 'Failed: ' + (e.message || e);
+    status.className = 'text-xs text-red mt-4 min-h-[1em]';
+  }
+}
+</script>
+{% endblock %}

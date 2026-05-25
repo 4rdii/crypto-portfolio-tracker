@@ -1,0 +1,186 @@
+{% extends "base.html" %}
+{% block title %}Wallets · Portfolio{% endblock %}
+
+{% block content %}
+<div class="flex items-center justify-between mb-6">
+  <h2 class="text-2xl font-semibold">Wallets</h2>
+  <button class="btn" onclick="scanAll()">↻ Scan all wallets</button>
+</div>
+
+<div class="card p-5 mb-6">
+  <h3 class="text-sm text-dim uppercase mb-3">Link a wallet</h3>
+  <p class="text-xs text-dim mb-4">To add a wallet, connect it and sign a short message. The signature proves ownership — we never request transaction approvals.</p>
+  <div class="flex gap-3 flex-wrap">
+    <button onclick="linkWallet('evm')" class="btn-ghost flex items-center gap-2">
+      <span>🦊</span> <span>Link EVM wallet</span>
+    </button>
+    <button onclick="linkWallet('solana')" class="btn-ghost flex items-center gap-2">
+      <span>◎</span> <span>Link Solana wallet</span>
+    </button>
+  </div>
+  <div class="text-xs text-dim mt-3">Supported: MetaMask, Rabby, Coinbase Wallet, Rainbow, Brave, Trust, Phantom, Solflare, Backpack, and more.</div>
+</div>
+
+<div class="card overflow-hidden">
+  <table>
+    <thead>
+      <tr>
+        <th>Label</th>
+        <th>Address</th>
+        <th>Chain</th>
+        <th>Verified</th>
+        <th>Last scanned</th>
+        <th></th>
+      </tr>
+    </thead>
+    <tbody id="walletRows"><tr><td colspan="6" class="text-dim text-center py-8">Loading…</td></tr></tbody>
+  </table>
+</div>
+
+<div id="scanStatus" class="mt-4 text-sm text-dim"></div>
+{% endblock %}
+
+{% block scripts %}
+<script>
+async function loadWallets() {
+  const ws = await fetch('/api/wallets').then(r => r.json());
+  if (!ws.length) {
+    document.getElementById('walletRows').innerHTML =
+      '<tr><td colspan="6" class="text-dim text-center py-10">No wallets linked yet. Click "Link wallet" above to add one.</td></tr>';
+    return;
+  }
+  document.getElementById('walletRows').innerHTML = ws.map(w => `
+    <tr>
+      <td class="font-medium">${esc(w.label)}</td>
+      <td class="num text-dim text-xs">${esc(shortAddr(w.address))}</td>
+      <td><span class="pill">${esc(w.chain)}</span></td>
+      <td>${w.verified ? '<span class="pill" style="background:#0d2818;color:#10b981">signed</span>' : '<span class="pill">unverified</span>'}</td>
+      <td class="text-dim text-xs">${w.last_scanned_at ? esc(timeAgo(w.last_scanned_at)) : 'never'}</td>
+      <td class="text-right">
+        <button class="btn-ghost text-xs" onclick="scanWallet(${Number(w.id)})">↻ Scan</button>
+        ${w.chain === 'evm' ? `<button class="btn-ghost text-xs" onclick="importHistory(${Number(w.id)})">⬇ Import history</button>` : ''}
+        <button class="btn-danger" onclick="delWallet(${Number(w.id)})">Remove</button>
+      </td>
+    </tr>`).join('');
+}
+
+async function linkWallet(kind) {
+  const label = prompt('Give this wallet a label (e.g. "Main EVM", "Degen Solana"):', kind === 'evm' ? 'EVM Wallet' : 'Solana Wallet');
+  if (label === null) return; // user cancelled
+  setStatus('Opening wallet…');
+  try {
+    if (kind === 'evm') {
+      await window.linkEvmWallet(label);
+    } else {
+      await window.linkSolanaWallet(label);
+    }
+    setStatus('✓ Wallet linked. Scanning…');
+    await loadWallets();
+    // Auto-scan the wallet we just added (find it by address match — the
+    // latest one in the list is likely newest but we play it safe and scan all)
+    const ws = await fetch('/api/wallets').then(r => r.json());
+    const latest = ws[0];
+    if (latest) {
+      const sr = await fetch('/api/wallets/' + latest.id + '/scan', { method: 'POST' }).then(r => r.json());
+      setStatus(`✓ Linked & scanned · ${sr.positions} positions · ${fmtUSD(sr.total_usd)}`);
+      loadWallets();
+    }
+  } catch (e) {
+    setStatus('Failed: ' + (e.message || e));
+  }
+}
+
+async function scanWallet(id) {
+  setStatus('Scanning…');
+  const sr = await fetch('/api/wallets/' + id + '/scan', { method: 'POST' }).then(r => r.json());
+  setStatus(`Found ${sr.positions} positions · ${fmtUSD(sr.total_usd)}`);
+  loadWallets();
+}
+
+async function importHistory(id) {
+  // Step 1: fetch the quote so the user sees the cost before committing.
+  setStatus('Estimating import cost…');
+  let quote;
+  try {
+    quote = await fetch('/api/wallets/' + id + '/estimate-import').then(r => r.json());
+  } catch (e) {
+    setStatus('Estimate failed: ' + e.message);
+    return;
+  }
+  if (quote.detail) { setStatus('Estimate failed: ' + quote.detail); return; }
+
+  // Build a human-readable confirm dialog. Free imports don't need the
+  // scary price talk; paid ones show the breakdown + current balance.
+  const chainSummary = quote.chains.filter(c => c.tx_count > 0)
+    .map(c => `  ${c.chain}: ${c.tx_count.toLocaleString()} txs`).join('\n') || '  (none detected)';
+  let msg;
+  if (quote.cost_usd <= 0) {
+    msg = `Import history for this wallet?\n\n` +
+          `Chains:\n${chainSummary}\n` +
+          `Total: ${quote.total_tx.toLocaleString()} txs\n\n` +
+          `Cost: FREE (within ${quote.free_allowance}-tx allowance)`;
+  } else {
+    msg = `Import history for this wallet?\n\n` +
+          `Chains:\n${chainSummary}\n` +
+          `Total: ${quote.total_tx.toLocaleString()} txs\n` +
+          (quote.is_delta
+            ? `Delta from last import: ${quote.chargeable_tx.toLocaleString()} chargeable txs (2× multiplier)`
+            : `Chargeable: ${quote.chargeable_tx.toLocaleString()} txs (first ${quote.free_allowance} free)`) + `\n\n` +
+          `Cost: $${quote.cost_usd.toFixed(2)}\n` +
+          `Your balance: $${quote.balance_usd.toFixed(2)}\n\n` +
+          (quote.affordable
+            ? `This will be deducted from your credit balance.`
+            : `⚠️ Not enough credit. Top up on the Billing page first.`);
+  }
+  if (!confirm(msg)) return;
+  if (!quote.affordable && quote.cost_usd > 0) {
+    setStatus('Insufficient credit. Visit /billing to top up.');
+    return;
+  }
+
+  setStatus('Importing history across EVM chains… (this can take a minute)');
+  try {
+    // Pass max_cost_usd so the server refuses to charge more than the
+    // quoted amount if the wallet's tx count has grown between the
+    // quote and the actual import (TOCTOU guard). Add a tiny buffer so
+    // rounding noise doesn't trip the guard on a legit same-quote import.
+    const r = await fetch('/api/wallets/' + id + '/import-history', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        max_cost_usd: Math.max(0.01, quote.cost_usd + 0.01),
+        chains: null,
+        fetch_prices: true,
+      }),
+    }).then(r => r.json());
+    if (r.ok) {
+      const chargeMsg = r.charged_usd > 0 ? ` · charged $${r.charged_usd.toFixed(2)} (balance: $${r.balance_usd.toFixed(2)})` : '';
+      setStatus(`✓ Imported ${r.inserted} new transactions (${r.found} found)${chargeMsg}`);
+    } else {
+      setStatus('Import failed: ' + (r.detail || 'unknown'));
+    }
+  } catch (e) {
+    setStatus('Import failed: ' + e.message);
+  }
+}
+
+async function delWallet(id) {
+  if (!confirm('Remove this wallet?\n\nThis will also delete ALL holdings and imported transaction history for this wallet. This cannot be undone.')) return;
+  await fetch('/api/wallets/' + id, { method: 'DELETE' });
+  loadWallets();
+}
+
+function setStatus(msg) { document.getElementById('scanStatus').textContent = msg; }
+function shortAddr(a) { return a.length > 16 ? a.slice(0,8) + '…' + a.slice(-6) : a; }
+function timeAgo(ts) {
+  const d = new Date(ts + 'Z'); const now = new Date();
+  const s = Math.floor((now - d) / 1000);
+  if (s < 60) return s + 's ago';
+  if (s < 3600) return Math.floor(s/60) + 'm ago';
+  if (s < 86400) return Math.floor(s/3600) + 'h ago';
+  return Math.floor(s/86400) + 'd ago';
+}
+
+loadWallets();
+</script>
+{% endblock %}

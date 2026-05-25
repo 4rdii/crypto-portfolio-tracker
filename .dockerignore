@@ -1,0 +1,32 @@
+__pycache__
+*.pyc
+*.pyo
+*.pyd
+.Python
+*.so
+*.egg
+*.egg-info
+.pytest_cache
+.vscode
+.idea
+.git
+.gitignore
+node_modules
+
+# Don't bake secrets or local state into the image.
+.env
+.env.sops
+webapp/portfolio.db
+webapp/portfolio.db-shm
+webapp/portfolio.db-wal
+webapp/webapp.log
+webapp/logs/
+sync_daemon.log
+
+# Docs / research / archive — not needed at runtime.
+docs/
+research/
+_archive_notion/
+AGENTS.md
+CLAUDE.md
+tests/

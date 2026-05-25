@@ -1,0 +1,54 @@
+<!doctype html>
+<html lang="en" class="dark">
+<head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>Fund Management — Login</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script>
+      tailwind.config = {
+        darkMode: 'class',
+        theme: { extend: { colors: { bg: '#0b0d12', panel: '#12151c', card: '#171a23', line: '#242834', ink: '#e6e8ef', dim: '#8b92a5', accent: '#6366f1' } } }
+      }
+    </script>
+    <style>
+      body { background: #0b0d12; color: #e6e8ef; font-family: -apple-system, BlinkMacSystemFont, "Inter", sans-serif; }
+    </style>
+</head>
+<body class="flex items-center justify-center min-h-screen">
+  <div class="bg-[#12151c] border border-[#242834] rounded-2xl p-8 w-full max-w-sm">
+    <div class="flex items-center gap-3 mb-6">
+      <div class="w-9 h-9 rounded-lg bg-[#6366f1] flex items-center justify-center font-bold text-white">◆</div>
+      <h1 class="text-xl font-semibold">Fund Management</h1>
+    </div>
+    <form onsubmit="login(event)">
+      <label class="text-[#8b92a5] text-xs uppercase">Password</label>
+      <input type="password" id="pw" autofocus required
+        class="w-full mt-1 mb-4 bg-[#0f1218] border border-[#2a2f3d] text-[#e6e8ef] px-3 py-2 rounded-lg outline-none focus:border-[#6366f1]">
+      <button type="submit"
+        class="w-full bg-[#6366f1] text-white py-2 rounded-lg font-medium hover:bg-[#4f46e5] transition">
+        Sign In
+      </button>
+      <p id="err" class="text-red-400 text-sm mt-3 hidden"></p>
+    </form>
+  </div>
+  <script>
+    async function login(e) {
+      e.preventDefault();
+      const pw = document.getElementById('pw').value;
+      const r = await fetch('/api/fund/login', {
+        method: 'POST',
+        headers: {'Content-Type': 'application/json'},
+        body: JSON.stringify({password: pw})
+      });
+      if (r.ok) {
+        window.location.href = '/fund';
+      } else {
+        const err = document.getElementById('err');
+        err.textContent = 'Wrong password';
+        err.classList.remove('hidden');
+      }
+    }
+  </script>
+</body>
+</html>

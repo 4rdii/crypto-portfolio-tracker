@@ -1,0 +1,226 @@
+{% extends "base.html" %}
+{% block title %}Dashboard · Portfolio{% endblock %}
+
+{% block content %}
+<div class="flex items-center justify-between mb-6">
+  <h2 class="text-2xl font-semibold">Dashboard</h2>
+  <button class="btn" onclick="scanAll()">↻ Scan all wallets</button>
+</div>
+
+<div id="kpis" class="grid grid-cols-1 md:grid-cols-4 gap-4 mb-6"></div>
+
+<div class="grid grid-cols-1 md:grid-cols-3 gap-4 mb-6">
+  <div class="card p-5 md:col-span-2">
+    <h3 class="text-sm text-dim mb-3">Portfolio Value</h3>
+    <div class="chart-box"><canvas id="trendChart"></canvas></div>
+  </div>
+  <div class="card p-5">
+    <div class="flex items-center justify-between mb-3">
+      <h3 class="text-sm text-dim" id="splitTitle">Chain Split</h3>
+      <!-- Two-way toggle: click to flip between chain-split and token-split
+           views on the same canvas. Kept deliberately minimal — the active
+           option is highlighted with the accent color. -->
+      <div class="flex gap-1 text-xs" id="splitToggle">
+        <button onclick="setSplitMode('chain')" id="splitChainBtn" class="pill" style="cursor:pointer;border:none;background:#6366f1;color:white">Chain</button>
+        <button onclick="setSplitMode('token')" id="splitTokenBtn" class="pill" style="cursor:pointer;border:none;background:#1c2029;color:#8b92a5">Token</button>
+      </div>
+    </div>
+    <div class="chart-box"><canvas id="splitChart"></canvas></div>
+  </div>
+</div>
+
+<div class="grid grid-cols-1 md:grid-cols-2 gap-4">
+  <div class="card p-5">
+    <h3 class="text-sm text-dim mb-3">Top Holdings</h3>
+    <div class="chart-box"><canvas id="allocChart"></canvas></div>
+  </div>
+  <div class="card p-5">
+    <h3 class="text-sm text-dim mb-3">Recent Activity</h3>
+    <div id="recentTx" class="text-sm" style="max-height: 260px; overflow-y: auto;"></div>
+  </div>
+</div>
+
+<style>
+  .chart-box {
+    position: relative;
+    width: 100%;
+    height: 260px;
+  }
+  .chart-box canvas {
+    position: absolute;
+    top: 0; left: 0;
+    width: 100% !important;
+    height: 100% !important;
+  }
+</style>
+{% endblock %}
+
+{% block scripts %}
+<script>
+async function loadDashboard() {
+  const d = await fetch('/api/dashboard').then(r => r.json());
+  const s = d.summary;
+
+  const kpi = (label, value, sub, color='') => `
+    <div class="card p-5">
+      <div class="text-xs text-dim uppercase">${label}</div>
+      <div class="text-2xl font-semibold mt-1 num ${color}">${value}</div>
+      <div class="text-xs text-dim mt-1">${sub}</div>
+    </div>`;
+
+  const pnlClass = s.unrealized_pnl >= 0 ? 'pos' : 'neg';
+  const pctClass = s.unrealized_pnl_pct >= 0 ? 'pos' : 'neg';
+  const rpnlClass = s.realized_pnl >= 0 ? 'pos' : 'neg';
+
+  document.getElementById('kpis').innerHTML =
+    kpi('Total Value', fmtUSD(s.total_value), `${d.holdings_count} positions · ${d.wallet_count} wallets`) +
+    kpi('Unrealized P&L', fmtUSD(s.unrealized_pnl), `${pct(s.unrealized_pnl_pct)} from cost`, pnlClass) +
+    kpi('Realized P&L', fmtUSD(s.realized_pnl), 'from closed trades', rpnlClass) +
+    kpi('Cost Basis', fmtUSD(s.total_cost_basis), 'total invested');
+
+  // Trend chart — if only 1 snapshot, render a visible point so it's not an empty axis
+  const snaps = d.snapshots;
+  if (snaps.length < 2) {
+    // Fabricate a second baseline point so Chart.js draws a flat line the user can see
+    const only = snaps[0] || { ts: new Date().toISOString(), total_usd: s.total_value };
+    snaps.unshift({ ts: only.ts, total_usd: only.total_usd });
+  }
+  new Chart(document.getElementById('trendChart'), {
+    type: 'line',
+    data: {
+      labels: snaps.map(s => s.ts.slice(5, 10)),
+      datasets: [{
+        data: snaps.map(s => s.total_usd),
+        borderColor: '#6366f1',
+        backgroundColor: 'rgba(99,102,241,0.15)',
+        fill: true,
+        tension: 0.35,
+        borderWidth: 2,
+        pointRadius: snaps.length <= 2 ? 4 : 0,
+        pointBackgroundColor: '#6366f1',
+      }]
+    },
+    options: chartOpts(true)
+  });
+  if (d.snapshots.length < 2) {
+    document.querySelector('#trendChart').parentElement.insertAdjacentHTML(
+      'afterend',
+      '<div class="text-xs text-dim mt-2">Only 1 snapshot so far — scan all wallets periodically to build history.</div>'
+    );
+  }
+
+  // Chain/Token split doughnut — rebuildable so the toggle can flip between
+  // two views of the same canvas without reloading the whole dashboard.
+  // The chart instance is stashed on `window` so setSplitMode() can destroy
+  // and recreate it in place.
+  window._dashboardData = d;
+  renderSplitChart(window._splitMode || 'chain');
+
+  // Allocation bar — horizontal (indexAxis: y). Category on Y, value on X,
+  // so the $ formatter must be applied to X ticks and Y must show the symbol label.
+  new Chart(document.getElementById('allocChart'), {
+    type: 'bar',
+    data: {
+      labels: d.allocation.map(a => a.symbol),
+      datasets: [{ data: d.allocation.map(a => a.value), backgroundColor: '#6366f1', borderRadius: 6 }]
+    },
+    options: {
+      responsive: true,
+      maintainAspectRatio: false,
+      indexAxis: 'y',
+      plugins: { legend: { display: false } },
+      scales: {
+        x: {
+          ticks: { color: '#8b92a5', font: { size: 10 }, callback: v => '$' + Number(v).toLocaleString() },
+          grid: { color: '#1c2029', drawBorder: false },
+        },
+        y: {
+          ticks: { color: '#8b92a5', font: { size: 11 } },
+          grid: { display: false },
+        },
+      },
+    },
+  });
+
+  // Recent tx
+  const txs = await fetch('/api/transactions').then(r => r.json());
+  const recent = txs.slice(0, 6);
+  document.getElementById('recentTx').innerHTML = recent.length
+    ? recent.map(t => `
+      <div class="flex justify-between py-2 border-b border-line last:border-0">
+        <div>
+          <span class="pill">${t.tx_type}</span>
+          <span class="ml-2 font-medium">${t.symbol}</span>
+          <span class="text-dim ml-1 num">${fmtNum(t.amount)}</span>
+        </div>
+        <div class="text-right">
+          <div class="num">${fmtUSD(t.total_usd)}</div>
+          <div class="text-xs text-dim">${t.ts.slice(0,10)}</div>
+        </div>
+      </div>`).join('')
+    : '<div class="text-dim">No transactions yet. <a href="/transactions" class="text-accent">Add one →</a></div>';
+}
+// Doughnut palette — reused for both chain and token split views.
+const SPLIT_COLORS = [
+  '#6366f1','#10b981','#f59e0b','#ef4444','#06b6d4','#8b5cf6','#ec4899','#14b8a6',
+  '#a3a3ff','#84cc16','#fb923c','#f472b6','#22d3ee','#c084fc','#fbbf24','#34d399',
+];
+
+function renderSplitChart(mode) {
+  const d = window._dashboardData;
+  if (!d) return;
+  const src = mode === 'token' ? (d.token_split || []) : (d.chain_split || []);
+  const labels = src.map(x => x.symbol || x.chain);
+  const values = src.map(x => x.value);
+
+  // Destroy previous chart instance before rebuilding — Chart.js otherwise
+  // stacks multiple canvases and leaks tooltip handlers.
+  if (window._splitChart) {
+    window._splitChart.destroy();
+    window._splitChart = null;
+  }
+  window._splitChart = new Chart(document.getElementById('splitChart'), {
+    type: 'doughnut',
+    data: {
+      labels,
+      datasets: [{
+        data: values,
+        backgroundColor: SPLIT_COLORS,
+        borderColor: '#0b0d12',
+        borderWidth: 2,
+      }]
+    },
+    options: {
+      plugins: {
+        legend: { labels: { color: '#8b92a5', font: { size: 11 } }, position: 'right' },
+        tooltip: {
+          callbacks: {
+            label: (ctx) => {
+              const total = ctx.dataset.data.reduce((a,b) => a+b, 0) || 1;
+              const p = (ctx.parsed / total * 100).toFixed(1);
+              return `${ctx.label}: ${fmtUSD(ctx.parsed)} (${p}%)`;
+            }
+          }
+        }
+      },
+      maintainAspectRatio: false,
+    }
+  });
+  document.getElementById('splitTitle').textContent =
+    mode === 'token' ? 'Token Split' : 'Chain Split';
+}
+
+function setSplitMode(mode) {
+  window._splitMode = mode;
+  // Toggle button styling
+  const on  = { background: '#6366f1', color: 'white' };
+  const off = { background: '#1c2029', color: '#8b92a5' };
+  const apply = (el, s) => Object.assign(el.style, s);
+  apply(document.getElementById('splitChainBtn'), mode === 'chain' ? on : off);
+  apply(document.getElementById('splitTokenBtn'), mode === 'token' ? on : off);
+  renderSplitChart(mode);
+}
+
+loadDashboard();
+</script>
+{% endblock %}

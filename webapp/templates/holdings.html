@@ -1,0 +1,208 @@
+{% extends "base.html" %}
+{% block title %}Holdings · Portfolio{% endblock %}
+
+{% block content %}
+<div class="flex items-center justify-between mb-6">
+  <h2 class="text-2xl font-semibold">Holdings</h2>
+  <button class="btn" onclick="scanAll()">↻ Scan all wallets</button>
+</div>
+
+<div id="summary" class="grid grid-cols-2 md:grid-cols-4 gap-4 mb-6"></div>
+
+<!-- Wallet filter: clickable chips. Click a chip to toggle it off; clicking
+     "All" re-enables every wallet. Filter state is held client-side and
+     pushed to the API via ?wallets=1,2,3 so cost-basis / P&L is recomputed
+     server-side as if the hidden wallets didn't exist. -->
+<div class="card p-4 mb-4 flex items-center gap-2 flex-wrap" id="walletFilter">
+  <span class="text-xs text-dim uppercase mr-2">Filter wallets:</span>
+  <div id="walletChips" class="flex flex-wrap gap-2"></div>
+</div>
+
+<div class="card overflow-hidden">
+  <table>
+    <thead>
+      <tr>
+        <th>Token</th>
+        <th class="text-right" title="Units currently held">Amount</th>
+        <th class="text-right" title="Weighted average price paid for the units you currently hold">Avg Buy</th>
+        <th class="text-right" title="Current market price">Market</th>
+        <th class="text-right" title="Total $ still on the books = Amount × Avg Buy">Invested</th>
+        <th class="text-right" title="Current market value = Amount × Market">Value</th>
+        <th class="text-right" title="Paper profit on units still held = Value − Invested">Unrealized</th>
+        <th class="text-right" title="Profit already locked in from units you've sold">Realized</th>
+      </tr>
+    </thead>
+    <tbody id="rows"><tr><td colspan="8" class="text-dim text-center py-8">Loading...</td></tr></tbody>
+  </table>
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script>
+// Per-wallet palette so a wallet's badge gets a stable color on every row.
+// Cycled by wallet_id modulo palette length.
+const WALLET_COLORS = [
+  { bg: '#1a2540', fg: '#8ab4ff' },  // blue
+  { bg: '#1a3a2a', fg: '#8ee6b3' },  // green
+  { bg: '#3a241a', fg: '#ffb585' },  // orange
+  { bg: '#2a1a3a', fg: '#d49aff' },  // purple
+  { bg: '#3a1a2a', fg: '#ff9abc' },  // pink
+  { bg: '#1a3a3a', fg: '#8ae6e6' },  // cyan
+];
+function walletColor(id) { return WALLET_COLORS[(id || 0) % WALLET_COLORS.length]; }
+
+// Selected wallet ids — kept in a Set so toggling is O(1). Populated lazily
+// from the first /api/holdings response (starts with every wallet on).
+let selectedWallets = null;   // Set<int> | null (null = not initialised yet)
+let allWallets = [];
+
+function renderWalletChips() {
+  const host = document.getElementById('walletChips');
+  const allOn = allWallets.every(w => selectedWallets.has(w.id));
+  const parts = [];
+  // "All" chip toggles every wallet at once
+  parts.push(`
+    <button class="pill" onclick="toggleAllWallets()" style="${allOn ? 'background:#6366f1;color:white' : 'background:#1c2029;color:#8b92a5'}; cursor:pointer; border:none;">
+      All
+    </button>
+  `);
+  for (const w of allWallets) {
+    const on = selectedWallets.has(w.id);
+    const c = walletColor(w.id);
+    const bg = on ? c.bg : '#14161c';
+    const fg = on ? c.fg : '#5a6070';
+    const shortAddr = w.address.length > 12 ? w.address.slice(0,6) + '…' + w.address.slice(-4) : w.address;
+    parts.push(`
+      <button class="pill" onclick="toggleWallet(${Number(w.id)})" style="background:${bg};color:${fg};cursor:pointer;border:1px solid ${on ? c.fg : '#2a2e38'};">
+        ${on ? '●' : '○'} ${esc(w.label)}
+        <span class="text-xs opacity-60 ml-1">${esc(shortAddr)}</span>
+      </button>
+    `);
+  }
+  host.innerHTML = parts.join('');
+}
+
+function toggleWallet(id) {
+  if (selectedWallets.has(id)) selectedWallets.delete(id);
+  else selectedWallets.add(id);
+  loadHoldings();
+}
+
+function toggleAllWallets() {
+  const allOn = allWallets.every(w => selectedWallets.has(w.id));
+  if (allOn) selectedWallets = new Set();           // deselect all
+  else selectedWallets = new Set(allWallets.map(w => w.id));
+  loadHoldings();
+}
+
+async function loadHoldings() {
+  // Only push the filter param once the user has actually touched the
+  // picker — first load fetches everything so the server doesn't need to
+  // know our client-side default.
+  let url = '/api/holdings';
+  if (selectedWallets !== null && allWallets.length > 0) {
+    const ids = [...selectedWallets];
+    url += '?wallets=' + (ids.length ? ids.join(',') : '0');  // '0' = no match → empty result
+  }
+  const d = await fetch(url).then(r => r.json());
+
+  // Initialise / refresh the wallet list + selection on first load
+  allWallets = d.wallets || [];
+  if (selectedWallets === null) {
+    selectedWallets = new Set(allWallets.map(w => w.id));
+  }
+  renderWalletChips();
+
+  const s = d.summary;
+  const kpi = (label, value, cls='') => `
+    <div class="card p-4">
+      <div class="text-xs text-dim uppercase">${label}</div>
+      <div class="text-xl font-semibold mt-1 num ${cls}">${value}</div>
+    </div>`;
+  document.getElementById('summary').innerHTML =
+    kpi('Portfolio Value', fmtUSD(s.total_value)) +
+    kpi('Total Invested', fmtUSD(s.total_cost_basis)) +
+    kpi('Unrealized P&L', fmtUSD(s.unrealized_pnl) + ' ('+pct(s.unrealized_pnl_pct)+')', s.unrealized_pnl >= 0 ? 'pos' : 'neg') +
+    kpi('Realized P&L', fmtUSD(s.realized_pnl), s.realized_pnl >= 0 ? 'pos' : 'neg');
+
+  if (!d.holdings.length) {
+    document.getElementById('rows').innerHTML =
+      '<tr><td colspan="8" class="text-dim text-center py-10">No holdings match the current filter. Toggle a wallet back on, or <a href="/wallets" class="text-accent">add a wallet</a>.</td></tr>';
+    return;
+  }
+
+  document.getElementById('rows').innerHTML = d.holdings.map(h => {
+    const pnlCls = h.unrealized_pnl >= 0 ? 'pos' : 'neg';
+    const rpnlCls = h.realized_pnl >= 0 ? 'pos' : 'neg';
+
+    // Wallet badges — dedupe by wallet_id since a single wallet can hold the
+    // same asset on multiple chains (e.g. ETH on eth + base + bsc from one
+    // wallet address should render as one "EVM Wallet" badge, not three).
+    const byWallet = new Map();
+    for (const w of (h.wallet_breakdown || [])) {
+      if (!byWallet.has(w.wallet_id)) byWallet.set(w.wallet_id, { ...w });
+      else byWallet.get(w.wallet_id).value += w.value;
+    }
+    const walletBadges = [...byWallet.values()]
+      .sort((a, b) => b.value - a.value)
+      .map(w => {
+        const c = walletColor(w.wallet_id);
+        return `<span class="pill ml-1" style="background:${c.bg};color:${c.fg};font-size:10px" title="${esc(w.label)} · ${esc(w.address || '')}">${esc(w.label)}</span>`;
+      }).join('');
+
+    // Protocol badges — skip plain "wallet", highlight DeFi positions
+    const protos = (h.protocols || 'wallet').split(',').filter(p => p && p !== 'wallet');
+    const protoBadges = protos.map(p => {
+      if (p === 'aave') return '<span class="pill ml-1" style="background:#1a1830;color:#b991ff;font-size:10px" title="Deposited in Aave">🏦 Aave</span>';
+      return `<span class="pill ml-1" style="font-size:10px">${esc(p)}</span>`;
+    }).join('');
+
+    // Closed positions get a special layout: no current balance / price /
+    // unrealized P&L, but we show the lifetime avg buy / avg sell so the
+    // user can see what they made on trades they've already exited.
+    if (h.closed) {
+      const closedBadge = '<span class="pill ml-1" style="background:#2a1f14;color:#e8a15e;font-size:10px" title="Position fully exited — shown for realized P&L history">CLOSED</span>';
+      return `
+        <tr style="opacity:0.7">
+          <td>
+            <div class="font-medium flex items-center flex-wrap">
+              <span>${esc(h.symbol)}</span>
+              ${closedBadge}
+            </div>
+            <div class="text-xs text-dim">${fmtNum(h.total_bought)} bought · ${fmtNum(h.total_sold)} sold</div>
+          </td>
+          <td class="text-right num text-dim">—</td>
+          <td class="text-right num">${fmtUSD(h.avg_buy_price)}<div class="text-xs text-dim">avg buy</div></td>
+          <td class="text-right num">${fmtUSD(h.avg_sell_price)}<div class="text-xs text-dim">avg sell</div></td>
+          <td class="text-right num">${fmtUSD(h.total_buy_cost)}</td>
+          <td class="text-right num font-medium">${fmtUSD(h.total_sell_proceeds)}</td>
+          <td class="text-right num text-dim">—</td>
+          <td class="text-right num ${rpnlCls}">${Math.abs(h.realized_pnl) > 0.01 ? fmtUSD(h.realized_pnl) : '—'}</td>
+        </tr>`;
+    }
+
+    return `
+      <tr>
+        <td>
+          <div class="font-medium flex items-center flex-wrap">
+            <span>${esc(h.symbol)}</span>
+            ${walletBadges}
+            ${protoBadges}
+          </div>
+          <div class="text-xs text-dim">${esc(h.chains || '—')}</div>
+        </td>
+        <td class="text-right num">${fmtNum(h.balance)}</td>
+        <td class="text-right num ${h.has_cost_basis ? '' : 'text-dim'}">${h.has_cost_basis ? fmtUSD(h.avg_cost) : '—'}</td>
+        <td class="text-right num">${fmtUSD(h.usd_price)}</td>
+        <td class="text-right num ${h.has_cost_basis ? '' : 'text-dim'}">${h.has_cost_basis ? fmtUSD(h.cost_basis_value) : '—'}</td>
+        <td class="text-right num font-medium">${fmtUSD(h.current_value)}</td>
+        <td class="text-right num ${h.has_cost_basis ? pnlCls : 'text-dim'}">
+          ${h.has_cost_basis ? fmtUSD(h.unrealized_pnl) + '<div class="text-xs">'+pct(h.unrealized_pnl_pct)+'</div>' : '—'}
+        </td>
+        <td class="text-right num ${rpnlCls}">${Math.abs(h.realized_pnl) > 0.01 ? fmtUSD(h.realized_pnl) : '—'}</td>
+      </tr>`;
+  }).join('');
+}
+loadHoldings();
+</script>
+{% endblock %}

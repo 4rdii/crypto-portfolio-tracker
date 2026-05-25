@@ -1,0 +1,339 @@
+<!doctype html>
+<html lang="en" class="dark">
+<head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>Fund Management</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.1/dist/chart.umd.min.js"></script>
+    <script>
+      tailwind.config = {
+        darkMode: 'class',
+        theme: {
+          extend: {
+            colors: {
+              bg: '#0b0d12',
+              panel: '#12151c',
+              card: '#171a23',
+              line: '#242834',
+              ink: '#e6e8ef',
+              dim: '#8b92a5',
+              accent: '#6366f1',
+              green: '#10b981',
+              red: '#ef4444',
+            }
+          }
+        }
+      }
+    </script>
+    <style>
+      body { background: #0b0d12; color: #e6e8ef; font-family: -apple-system, BlinkMacSystemFont, "Inter", "Segoe UI", sans-serif; }
+      .card { background: #12151c; border: 1px solid #242834; border-radius: 14px; }
+      .btn { background: #6366f1; color: white; padding: 8px 14px; border-radius: 8px; font-weight: 500; transition: all .15s; }
+      .btn:hover { background: #4f46e5; }
+      .btn-ghost { background: #1f2330; color: #e6e8ef; padding: 8px 14px; border-radius: 8px; border: 1px solid #2a2f3d; }
+      .btn-ghost:hover { background: #262b3a; }
+      .input { background: #0f1218; border: 1px solid #2a2f3d; color: #e6e8ef; padding: 8px 12px; border-radius: 8px; outline: none; }
+      .input:focus { border-color: #6366f1; }
+      table { width: 100%; border-collapse: collapse; }
+      th { text-align: left; color: #8b92a5; font-weight: 500; font-size: 12px; text-transform: uppercase; padding: 12px 10px; border-bottom: 1px solid #242834; }
+      td { padding: 14px 10px; border-bottom: 1px solid #1c2029; font-size: 14px; }
+      tr:hover td { background: #14171f; }
+      .pos { color: #10b981; }
+      .neg { color: #ef4444; }
+      .pill { font-size: 11px; padding: 2px 8px; border-radius: 999px; background: #1f2330; color: #8b92a5; }
+      .num { font-variant-numeric: tabular-nums; }
+    </style>
+</head>
+<body>
+<div class="max-w-7xl mx-auto px-6 py-6">
+  <header class="flex items-center justify-between mb-8">
+    <div class="flex items-center gap-3">
+      <div class="w-9 h-9 rounded-lg bg-accent flex items-center justify-center font-bold">◆</div>
+      <h1 class="text-xl font-semibold">Fund Management</h1>
+    </div>
+    <span class="text-dim text-sm">Goals 1404</span>
+  </header>
+
+  <main>
+
+<!-- Summary Cards -->
+<div class="grid grid-cols-1 md:grid-cols-4 gap-4 mb-8">
+  <div class="card p-5">
+    <div class="text-dim text-xs uppercase mb-1">Pooled Value</div>
+    <div class="text-2xl font-bold num" id="pooledValue">—</div>
+  </div>
+  <div class="card p-5">
+    <div class="text-dim text-xs uppercase mb-1">Total AUM</div>
+    <div class="text-2xl font-bold num" id="totalAum">—</div>
+  </div>
+  <div class="card p-5">
+    <div class="text-dim text-xs uppercase mb-1">NAV / Share</div>
+    <div class="text-2xl font-bold num" id="navPerShare">—</div>
+  </div>
+  <div class="card p-5">
+    <div class="text-dim text-xs uppercase mb-1">Shareholders</div>
+    <div class="text-2xl font-bold" id="shCount">—</div>
+  </div>
+</div>
+
+<div class="grid grid-cols-1 lg:grid-cols-3 gap-6">
+
+  <!-- Shareholders Table -->
+  <div class="lg:col-span-2">
+    <div class="card p-6">
+      <div class="flex items-center justify-between mb-4">
+        <h2 class="text-lg font-semibold">Shareholders</h2>
+        <button onclick="openModal('addPerson')" class="btn text-sm">+ Add Person</button>
+      </div>
+      <table>
+        <thead>
+          <tr>
+            <th>Name</th>
+            <th class="text-right">Shares</th>
+            <th class="text-right">Pool %</th>
+            <th class="text-right">Pool Value</th>
+            <th class="text-right">Personal</th>
+            <th class="text-right">Total</th>
+          </tr>
+        </thead>
+        <tbody id="shTable"></tbody>
+        <tfoot id="shFooter"></tfoot>
+      </table>
+    </div>
+
+    <!-- Transaction History -->
+    <div class="card p-6 mt-6">
+      <div class="flex items-center justify-between mb-4">
+        <h2 class="text-lg font-semibold">Transaction History</h2>
+        <select id="historyFilter" onchange="loadHistory()" class="input text-sm">
+          <option value="">All</option>
+        </select>
+      </div>
+      <table>
+        <thead>
+          <tr>
+            <th>Date</th>
+            <th>Person</th>
+            <th>Type</th>
+            <th class="text-right">Amount</th>
+            <th class="text-right">Shares</th>
+            <th class="text-right">NAV</th>
+            <th>Note</th>
+          </tr>
+        </thead>
+        <tbody id="txTable"></tbody>
+      </table>
+      <p id="txEmpty" class="text-dim text-sm py-4 text-center hidden">No transactions yet.</p>
+    </div>
+  </div>
+
+  <!-- Right Panel -->
+  <div>
+    <!-- Allocation Pie -->
+    <div class="card p-6 mb-6">
+      <h2 class="text-lg font-semibold mb-4">Allocation</h2>
+      <canvas id="pieChart" height="220"></canvas>
+    </div>
+
+    <!-- Deposit / Withdraw -->
+    <div class="card p-6">
+      <h2 class="text-lg font-semibold mb-4">Record Transaction</h2>
+      <form id="txForm" onsubmit="submitTx(event)">
+        <div class="mb-3">
+          <label class="text-dim text-xs uppercase">Person</label>
+          <select id="txPerson" class="input w-full mt-1" required></select>
+        </div>
+        <div class="mb-3">
+          <label class="text-dim text-xs uppercase">Type</label>
+          <div class="flex gap-2 mt-1">
+            <label class="flex-1">
+              <input type="radio" name="txType" value="deposit" checked class="hidden peer">
+              <div class="peer-checked:bg-accent peer-checked:border-accent btn-ghost text-center cursor-pointer text-sm">Deposit</div>
+            </label>
+            <label class="flex-1">
+              <input type="radio" name="txType" value="withdrawal" class="hidden peer">
+              <div class="peer-checked:bg-red peer-checked:border-red-500 btn-ghost text-center cursor-pointer text-sm">Withdraw</div>
+            </label>
+          </div>
+        </div>
+        <div class="mb-3">
+          <label class="text-dim text-xs uppercase">Amount (USD)</label>
+          <input type="number" step="0.01" min="0.01" id="txAmount" class="input w-full mt-1" required>
+        </div>
+        <div class="mb-4">
+          <label class="text-dim text-xs uppercase">Note (optional)</label>
+          <input type="text" id="txNote" class="input w-full mt-1" placeholder="e.g. Monthly DCA">
+        </div>
+        <button type="submit" class="btn w-full">Submit</button>
+      </form>
+      <div id="txResult" class="mt-3 text-sm hidden"></div>
+    </div>
+  </div>
+</div>
+
+<!-- Add Person Modal -->
+<div id="addPersonModal" class="fixed inset-0 bg-black/60 flex items-center justify-center z-50 hidden">
+  <div class="card p-6 w-full max-w-sm">
+    <h3 class="text-lg font-semibold mb-4">Add Shareholder</h3>
+    <form onsubmit="addPerson(event)">
+      <div class="mb-3">
+        <label class="text-dim text-xs uppercase">Name</label>
+        <input type="text" id="newName" class="input w-full mt-1" required>
+      </div>
+      <div class="mb-4">
+        <label class="text-dim text-xs uppercase">Initial Shares</label>
+        <input type="number" step="0.01" id="newShares" class="input w-full mt-1" value="0">
+      </div>
+      <div class="flex gap-2">
+        <button type="button" onclick="closeModal('addPerson')" class="btn-ghost flex-1">Cancel</button>
+        <button type="submit" class="btn flex-1">Add</button>
+      </div>
+    </form>
+  </div>
+</div>
+
+  </main>
+</div>
+
+<script>
+const API = '/api/fund';
+const fmt = (n) => '$' + Number(n).toLocaleString('en-US', {minimumFractionDigits: 2, maximumFractionDigits: 2});
+const fmtShares = (n) => Number(n).toLocaleString('en-US', {minimumFractionDigits: 2, maximumFractionDigits: 4});
+const COLORS = ['#6366f1','#10b981','#f59e0b','#ef4444','#8b5cf6','#ec4899','#14b8a6','#f97316'];
+
+let chartInstance = null;
+
+async function loadAll() {
+  const r = await fetch(API + '/status');
+  if (r.status === 401) { window.location.href = '/fund'; return; }
+  const d = await r.json();
+
+  document.getElementById('pooledValue').textContent = fmt(d.pooled_value);
+  document.getElementById('totalAum').textContent = fmt(d.total_aum);
+  document.getElementById('navPerShare').textContent = fmt(d.nav_per_share);
+  document.getElementById('shCount').textContent = d.shareholders.length;
+
+  const tbody = document.getElementById('shTable');
+  tbody.innerHTML = '';
+  const select = document.getElementById('txPerson');
+  const filter = document.getElementById('historyFilter');
+  select.innerHTML = '';
+  const allOpt = filter.querySelector('option[value=""]');
+  filter.innerHTML = '';
+  filter.appendChild(allOpt || Object.assign(document.createElement('option'), {value: '', textContent: 'All'}));
+
+  d.shareholders.forEach((sh) => {
+    const tr = document.createElement('tr');
+    const personalStr = sh.personal > 0 ? fmt(sh.personal) : '<span class="text-dim">—</span>';
+    tr.innerHTML = `
+      <td class="font-medium">${sh.name}</td>
+      <td class="text-right num">${fmtShares(sh.shares)}</td>
+      <td class="text-right num">${sh.pool_pct.toFixed(1)}%</td>
+      <td class="text-right num">${fmt(sh.pool_value)}</td>
+      <td class="text-right num">${personalStr}</td>
+      <td class="text-right num font-medium">${fmt(sh.total)}</td>
+    `;
+    tbody.appendChild(tr);
+    select.appendChild(Object.assign(document.createElement('option'), {value: sh.name, textContent: sh.name}));
+    filter.appendChild(Object.assign(document.createElement('option'), {value: sh.name, textContent: sh.name}));
+  });
+
+  const foot = document.getElementById('shFooter');
+  foot.innerHTML = `<tr class="border-t border-line">
+    <td class="font-bold">Total</td>
+    <td class="text-right num font-bold">${fmtShares(d.total_shares)}</td>
+    <td class="text-right num font-bold">100%</td>
+    <td class="text-right num font-bold">${fmt(d.pooled_value)}</td>
+    <td></td>
+    <td class="text-right num font-bold">${fmt(d.total_aum)}</td>
+  </tr>`;
+
+  const labels = d.shareholders.filter(s => s.total > 0).map(s => s.name);
+  const values = d.shareholders.filter(s => s.total > 0).map(s => s.total);
+  if (chartInstance) chartInstance.destroy();
+  chartInstance = new Chart(document.getElementById('pieChart'), {
+    type: 'doughnut',
+    data: { labels, datasets: [{ data: values, backgroundColor: COLORS, borderWidth: 0 }] },
+    options: {
+      responsive: true,
+      plugins: {
+        legend: { position: 'bottom', labels: { color: '#8b92a5', padding: 12, font: { size: 11 } } },
+        tooltip: { callbacks: { label: (ctx) => `${ctx.label}: ${fmt(ctx.raw)}` } }
+      },
+      cutout: '60%',
+    }
+  });
+
+  loadHistory();
+}
+
+async function loadHistory() {
+  const person = document.getElementById('historyFilter').value;
+  const url = person ? `${API}/history?person=${encodeURIComponent(person)}` : `${API}/history`;
+  const r = await fetch(url);
+  const txs = await r.json();
+  const tbody = document.getElementById('txTable');
+  const empty = document.getElementById('txEmpty');
+
+  if (!txs.length) { tbody.innerHTML = ''; empty.classList.remove('hidden'); return; }
+  empty.classList.add('hidden');
+
+  tbody.innerHTML = txs.map(tx => {
+    const cls = tx.type === 'deposit' ? 'pos' : tx.type === 'withdrawal' ? 'neg' : 'text-dim';
+    const sign = tx.shares_delta > 0 ? '+' : '';
+    const typeLabel = tx.type.charAt(0).toUpperCase() + tx.type.slice(1);
+    return `<tr>
+      <td class="text-dim text-sm">${tx.created_at.slice(0,16)}</td>
+      <td>${tx.name}</td>
+      <td><span class="pill ${cls}">${typeLabel}</span></td>
+      <td class="text-right num">${fmt(tx.usd_amount)}</td>
+      <td class="text-right num ${cls}">${sign}${fmtShares(tx.shares_delta)}</td>
+      <td class="text-right num">${fmt(tx.nav_per_share)}</td>
+      <td class="text-dim text-sm">${tx.note || ''}</td>
+    </tr>`;
+  }).join('');
+}
+
+async function submitTx(e) {
+  e.preventDefault();
+  const person = document.getElementById('txPerson').value;
+  const type = document.querySelector('input[name="txType"]:checked').value;
+  const amount = parseFloat(document.getElementById('txAmount').value);
+  const note = document.getElementById('txNote').value;
+  const res = document.getElementById('txResult');
+
+  const r = await fetch(`${API}/${type}`, {
+    method: 'POST', headers: {'Content-Type': 'application/json'},
+    body: JSON.stringify({person, amount, note})
+  });
+  const d = await r.json();
+  if (r.ok) {
+    res.className = 'mt-3 text-sm pos'; res.textContent = d.message; res.classList.remove('hidden');
+    document.getElementById('txAmount').value = ''; document.getElementById('txNote').value = '';
+    loadAll();
+  } else {
+    res.className = 'mt-3 text-sm neg'; res.textContent = d.detail || 'Error'; res.classList.remove('hidden');
+  }
+  setTimeout(() => res.classList.add('hidden'), 5000);
+}
+
+async function addPerson(e) {
+  e.preventDefault();
+  const name = document.getElementById('newName').value;
+  const shares = parseFloat(document.getElementById('newShares').value) || 0;
+  const r = await fetch(`${API}/add-person`, {
+    method: 'POST', headers: {'Content-Type': 'application/json'},
+    body: JSON.stringify({name, shares})
+  });
+  if (r.ok) { closeModal('addPerson'); document.getElementById('newName').value = ''; loadAll(); }
+  else { const d = await r.json(); alert(d.detail || 'Error'); }
+}
+
+function openModal(id) { document.getElementById(id + 'Modal').classList.remove('hidden'); }
+function closeModal(id) { document.getElementById(id + 'Modal').classList.add('hidden'); }
+
+loadAll();
+</script>
+</body>
+</html>

@@ -1,0 +1,386 @@
+{% extends "base.html" %}
+{% block title %}Billing · Portfolio{% endblock %}
+
+{% block content %}
+<div class="flex items-center justify-between mb-6">
+  <h2 class="text-2xl font-semibold">Billing</h2>
+  <button class="btn" onclick="pollNow()">↻ Check for new deposits</button>
+</div>
+
+<div class="grid grid-cols-1 md:grid-cols-3 gap-4 mb-6">
+  <div class="card p-5 md:col-span-1">
+    <div class="text-xs text-dim uppercase">Credit Balance</div>
+    <div id="balance" class="text-4xl font-semibold mt-2 num">—</div>
+    <div class="text-xs text-dim mt-2">Dollar-denominated. Used to pay for paid operations like history imports.</div>
+  </div>
+  <div class="card p-5 md:col-span-2">
+    <div class="text-xs text-dim uppercase mb-2">How pricing works</div>
+    <div id="pricingBlurb" class="text-sm"></div>
+  </div>
+</div>
+
+<div class="card p-5 mb-6">
+  <h3 class="text-sm text-dim uppercase mb-3">Top up with connected wallet</h3>
+  <p class="text-sm mb-4">
+    Pay directly from a wallet you've <a href="/wallets" class="text-accent">linked</a>.
+    Pick a chain + stablecoin, confirm the transfer in your wallet, and we'll credit
+    you as soon as the transaction confirms (usually under a minute).
+  </p>
+
+  <div class="grid grid-cols-1 md:grid-cols-4 gap-3 mb-3">
+    <div>
+      <div class="text-xs text-dim mb-1">Network</div>
+      <select id="payChain" class="input w-full" onchange="onPayChainChange()"></select>
+    </div>
+    <div>
+      <div class="text-xs text-dim mb-1">Token</div>
+      <select id="payToken" class="input w-full"></select>
+    </div>
+    <div>
+      <div class="text-xs text-dim mb-1">Amount (USD)</div>
+      <input id="payAmount" type="number" step="0.01" min="1" value="10" class="input w-full num" />
+    </div>
+    <div class="flex items-end">
+      <button id="payBtn" class="btn btn-primary w-full" onclick="doWalletPay()">Pay</button>
+    </div>
+  </div>
+
+  <div class="flex flex-wrap gap-2 mb-3">
+    <button class="btn text-xs" onclick="setPayAmount(10)">$10</button>
+    <button class="btn text-xs" onclick="setPayAmount(25)">$25</button>
+    <button class="btn text-xs" onclick="setPayAmount(50)">$50</button>
+    <button class="btn text-xs" onclick="setPayAmount(100)">$100</button>
+    <button class="btn text-xs" onclick="setPayAmount(250)">$250</button>
+  </div>
+
+  <div id="payStatus" class="text-sm mt-3"></div>
+
+  <div class="text-xs text-dim mt-4">
+    ⚠️ Pay only from a wallet you've linked to this account — we match the deposit
+    by sender address. If the connected wallet isn't linked, the payment will be
+    flagged as unclaimed until you link it.
+  </div>
+</div>
+
+<details class="card p-5 mb-6">
+  <summary class="cursor-pointer text-sm text-dim uppercase">Advanced · manual transfer (fallback)</summary>
+  <p class="text-sm mt-3 mb-3">
+    If your wallet doesn't support in-app payments, you can send a transfer manually
+    to the treasury address below. The background watcher will pick it up within a
+    minute or two. Send only from a linked wallet.
+  </p>
+  <div class="bg-line p-3 rounded-lg mb-3">
+    <div class="text-xs text-dim mb-1">Treasury address (any EVM chain)</div>
+    <div class="flex items-center gap-2">
+      <code id="treasuryAddr" class="text-accent text-sm break-all flex-1">—</code>
+      <button class="btn text-xs" onclick="copyTreasury()">Copy</button>
+    </div>
+  </div>
+  <div class="text-xs text-dim mb-1">Accepted tokens</div>
+  <div id="acceptedTokens" class="flex flex-wrap gap-2"></div>
+</details>
+
+<div class="card p-5">
+  <h3 class="text-sm text-dim uppercase mb-3">Credit history</h3>
+  <div id="creditHistory"></div>
+</div>
+
+{% endblock %}
+
+{% block scripts %}
+<script>
+let _treasuryAddr = '';
+let _payCfg = null;  // /api/billing/pay/tokens payload
+
+async function loadBilling() {
+  const d = await fetch('/api/billing/summary').then(r => r.json());
+  document.getElementById('balance').textContent = fmtUSD(d.balance_usd);
+  _treasuryAddr = d.treasury_address;
+  document.getElementById('treasuryAddr').textContent = d.treasury_address;
+
+  // Pricing blurb — translate the struct into plain English
+  const p = d.pricing;
+  document.getElementById('pricingBlurb').innerHTML = `
+    <ul class="space-y-1 text-sm">
+      <li>• <b>History import:</b> $${p.per_tx.toFixed(3)}/tx, with a $${p.min_charge.toFixed(2)} minimum per import</li>
+      <li>• <b>First ${p.free_allowance} transactions are free</b> on every wallet's initial import</li>
+      <li>• <b>Re-imports</b> charge ${p.delta_multiplier}× the delta (new txs only)</li>
+      <li>• <b>Live scans</b> (current holdings, prices, P&L) stay free</li>
+      <li>• <b>Refunds</b> are automatic if an import fails on our end</li>
+    </ul>
+  `;
+
+  // Accepted tokens as pills (list comes from our own allowlist but escape
+  // anyway — defense in depth, same cost)
+  document.getElementById('acceptedTokens').innerHTML = d.accepted_tokens
+    .map(t => `<span class="pill">${esc(t)}</span>`).join('');
+
+  // Fetch the per-chain pay config (stablecoin contracts + decimals + chain_id)
+  // and populate the chain/token dropdowns. Done in parallel-ish with summary —
+  // if this errors the card still renders, the Pay button just won't arm.
+  try {
+    _payCfg = await fetch('/api/billing/pay/tokens').then(r => r.json());
+    populatePayDropdowns();
+  } catch (e) {
+    console.error('pay config load failed', e);
+    document.getElementById('payStatus').innerHTML =
+      `<span class="neg">Couldn't load payment options: ${esc(String(e))}</span>`;
+  }
+
+  // Credit history
+  const host = document.getElementById('creditHistory');
+  if (!d.transactions.length) {
+    host.innerHTML = '<div class="text-dim text-sm">No credit activity yet. Send a deposit above to get started.</div>';
+    return;
+  }
+  host.innerHTML = `
+    <div class="overflow-x-auto">
+      <table class="w-full">
+        <thead>
+          <tr>
+            <th>When</th>
+            <th>Kind</th>
+            <th>Details</th>
+            <th class="text-right">Amount</th>
+          </tr>
+        </thead>
+        <tbody>
+          ${d.transactions.map(t => {
+            const isCredit = t.delta_usd > 0;
+            const cls = isCredit ? 'pos' : 'neg';
+            const kind = (t.kind || '').slice(0,1).toUpperCase() + (t.kind || '').slice(1);
+            // Build the detail string from validated fields. topup rows are
+            // synthesized from allowlisted symbols/chains so they're safe,
+            // but notes can be anything — always escape.
+            let detail;
+            if (t.kind === 'topup') {
+              const fromShort = t.from_address
+                ? ` · from ${String(t.from_address).slice(0,6)}…${String(t.from_address).slice(-4)}`
+                : '';
+              detail = `${fmtNum(t.token_amount)} ${esc(t.token_symbol)} on ${esc(t.chain)}${esc(fromShort)}`;
+            } else {
+              detail = esc(t.notes || '');
+            }
+            return `
+              <tr>
+                <td class="text-xs text-dim">${esc((t.created_at || '').slice(0,16).replace('T',' '))}</td>
+                <td><span class="pill">${esc(kind)}</span></td>
+                <td class="text-sm">${detail}</td>
+                <td class="text-right num ${cls}">${isCredit ? '+' : ''}${fmtUSD(t.delta_usd)}</td>
+              </tr>
+            `;
+          }).join('')}
+        </tbody>
+      </table>
+    </div>
+  `;
+}
+
+async function copyTreasury() {
+  try {
+    await navigator.clipboard.writeText(_treasuryAddr);
+    toast('Treasury address copied');
+  } catch {
+    alert('Copy failed — address: ' + _treasuryAddr);
+  }
+}
+
+async function pollNow() {
+  toast('Checking treasury for new deposits...');
+  await fetch('/api/billing/poll-now', { method: 'POST' }).then(r => r.json());
+  await loadBilling();
+  toast('Done');
+}
+
+// ---------- In-app wallet pay ----------
+
+function populatePayDropdowns() {
+  if (!_payCfg || !_payCfg.chains) return;
+  const chainSel = document.getElementById('payChain');
+  chainSel.innerHTML = _payCfg.chains
+    .map(c => `<option value="${esc(c.chain)}">${esc(c.display)}</option>`)
+    .join('');
+  onPayChainChange();
+}
+
+function onPayChainChange() {
+  const chainName = document.getElementById('payChain').value;
+  const chain = _payCfg.chains.find(c => c.chain === chainName);
+  const tokenSel = document.getElementById('payToken');
+  if (!chain) { tokenSel.innerHTML = ''; return; }
+  tokenSel.innerHTML = chain.tokens
+    .map(t => `<option value="${esc(t.symbol)}">${esc(t.symbol)}</option>`)
+    .join('');
+}
+
+function setPayAmount(n) {
+  document.getElementById('payAmount').value = String(n);
+}
+
+function _setPayStatus(kind, text) {
+  // kind: 'info' | 'ok' | 'err' | 'warn'
+  const cls = { ok: 'pos', err: 'neg', warn: 'text-accent', info: 'text-dim' }[kind] || '';
+  document.getElementById('payStatus').innerHTML = `<span class="${cls}">${esc(text)}</span>`;
+}
+
+async function _ensureEvmChain(targetChainIdDec) {
+  // Switch the wallet to the chain we're paying on. If the chain isn't
+  // added to the wallet, the wallet returns 4902 — we let that bubble up
+  // with a clear error since we don't want to auto-add unknown networks
+  // (that's how phishing RPCs get installed).
+  const hex = '0x' + targetChainIdDec.toString(16);
+  try {
+    await window.ethereum.request({
+      method: 'wallet_switchEthereumChain',
+      params: [{ chainId: hex }],
+    });
+  } catch (e) {
+    if (e && e.code === 4902) {
+      throw new Error(`Chain ${targetChainIdDec} isn't added to your wallet. Add it first, then retry.`);
+    }
+    throw e;
+  }
+}
+
+async function doWalletPay() {
+  const btn = document.getElementById('payBtn');
+  if (btn.disabled) return;  // single-flight
+  if (!_payCfg) {
+    _setPayStatus('err', 'Payment config not loaded yet. Refresh and try again.');
+    return;
+  }
+  if (!window.ethereum) {
+    _setPayStatus('err', 'No EVM wallet detected in this browser (install MetaMask, Rabby, etc).');
+    return;
+  }
+
+  const chainName = document.getElementById('payChain').value;
+  const tokenSym  = document.getElementById('payToken').value;
+  const amountUsd = parseFloat(document.getElementById('payAmount').value);
+
+  if (!chainName || !tokenSym) {
+    _setPayStatus('err', 'Pick a chain and token first.');
+    return;
+  }
+  if (!(amountUsd > 0) || !Number.isFinite(amountUsd)) {
+    _setPayStatus('err', 'Enter a valid amount (> $0).');
+    return;
+  }
+  // UI-side cap — server also rejects > $100k via Field(le=100000).
+  if (amountUsd > 100000) {
+    _setPayStatus('err', 'Max single top-up is $100,000.');
+    return;
+  }
+
+  const chainCfg = _payCfg.chains.find(c => c.chain === chainName);
+  const tokenCfg = chainCfg && chainCfg.tokens.find(t => t.symbol === tokenSym);
+  if (!chainCfg || !tokenCfg) {
+    _setPayStatus('err', 'Unknown chain/token combo.');
+    return;
+  }
+
+  btn.disabled = true;
+  btn.textContent = 'Working…';
+  try {
+    _setPayStatus('info', 'Requesting wallet connection…');
+    const provider = new ethers.BrowserProvider(window.ethereum);
+    // Force an account prompt — ensures we get a current signer even if
+    // the user disconnected the site in their wallet extension.
+    await provider.send('eth_requestAccounts', []);
+
+    _setPayStatus('info', `Switching wallet to ${chainCfg.display}…`);
+    await _ensureEvmChain(chainCfg.chain_id);
+
+    // Re-create the provider after chain switch so getSigner() returns a
+    // signer bound to the NEW network (ethers caches the initial network
+    // and will refuse to broadcast if the signer's chainId drifted).
+    const provider2 = new ethers.BrowserProvider(window.ethereum);
+    const signer = await provider2.getSigner();
+    const net = await provider2.getNetwork();
+    if (Number(net.chainId) !== chainCfg.chain_id) {
+      throw new Error(`Wallet still on chain ${net.chainId}, expected ${chainCfg.chain_id}.`);
+    }
+
+    // Stablecoins only in the UI → 1 token = $1. Convert USD amount to
+    // token base units using the contract's decimals. ethers.parseUnits
+    // handles the decimal shift (and throws on too-many-decimal-places,
+    // which is the correct failure mode).
+    const unitsStr = amountUsd.toFixed(tokenCfg.decimals);
+    const units = ethers.parseUnits(unitsStr, tokenCfg.decimals);
+
+    const erc20 = new ethers.Contract(
+      tokenCfg.contract,
+      ['function transfer(address to, uint256 amount) returns (bool)'],
+      signer,
+    );
+
+    _setPayStatus('warn', 'Confirm the transfer in your wallet…');
+    const tx = await erc20.transfer(_payCfg.treasury_address, units);
+
+    _setPayStatus('info', `Broadcast: ${tx.hash.slice(0, 10)}… waiting for on-chain confirmation`);
+    // Wait for 1 confirmation so the server's /transaction lookup will
+    // return a receipt status. The server still enforces its own maturity
+    // delay (60-180s) before crediting.
+    await tx.wait(1);
+
+    _setPayStatus('info', 'Confirmed on-chain. Verifying with server…');
+    await _verifyWithServer(chainName, tx.hash, tokenSym, amountUsd);
+  } catch (e) {
+    console.error('wallet pay failed', e);
+    const msg = (e && (e.shortMessage || e.message)) || String(e);
+    _setPayStatus('err', `Payment failed: ${msg}`);
+  } finally {
+    btn.disabled = false;
+    btn.textContent = 'Pay';
+  }
+}
+
+async function _verifyWithServer(chain, txHash, tokenSym, amountUsd) {
+  // Server-side verify is the source of truth. On "pending" we retry a
+  // handful of times (the server waits for the confirmation-delay window
+  // which can be 1-3 min depending on chain).
+  const body = {
+    chain: chain,
+    tx_hash: txHash,
+    expected_token: tokenSym,
+    expected_usd: amountUsd,
+  };
+  const maxAttempts = 12;   // ~4 min total with 20s spacing
+  for (let i = 0; i < maxAttempts; i++) {
+    const r = await fetch('/api/billing/pay/verify', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(body),
+    });
+    if (r.status === 429) {
+      _setPayStatus('err', 'Rate limited — wait a minute and click "Check for new deposits".');
+      return;
+    }
+    const data = await r.json();
+    if (data.status === 'credited') {
+      _setPayStatus('ok', `✓ Credited $${data.amount_usd.toFixed(2)}. New balance: $${data.balance_usd.toFixed(2)}`);
+      await loadBilling();  // refresh balance + history
+      return;
+    }
+    if (data.status === 'rejected') {
+      _setPayStatus('err', `Rejected: ${data.reason || 'unknown reason'}`);
+      return;
+    }
+    // pending → wait and retry
+    _setPayStatus('info', `Pending (${i+1}/${maxAttempts}): ${data.reason || 'waiting for confirmations'}`);
+    await new Promise(res => setTimeout(res, 20000));
+  }
+  _setPayStatus('warn', 'Still pending after ~4 min. Try "Check for new deposits" in a minute — the background watcher will pick it up.');
+}
+
+function toast(msg) {
+  const el = document.createElement('div');
+  el.textContent = msg;
+  el.style.cssText = 'position:fixed;bottom:20px;right:20px;background:#1c2029;color:#e6e8ef;padding:10px 14px;border-radius:8px;z-index:1000;font-size:13px;border:1px solid #2a2e38';
+  document.body.appendChild(el);
+  setTimeout(() => el.remove(), 2500);
+}
+
+loadBilling();
+</script>
+{% endblock %}
