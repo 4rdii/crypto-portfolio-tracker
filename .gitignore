@@ -38,3 +38,11 @@ sync_daemon.log
 .idea/
 .vscode/
 webapp/.session_secret
+
+# Internal / private — kept locally, not published
+CLAUDE.md
+AGENTS.md
+research/
+_archive_notion/
+docs/LISTING_COPY.md
+docs/SETUP_GUIDE.pdf
