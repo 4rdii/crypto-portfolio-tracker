@@ -5,7 +5,7 @@ short (bullet per change) with "why" commentary where the "what" isn't obvious.
 
 ## 2026-04-11 — Solana support + self-transfer fix + tax UI + stability
 
-A multi-topic day: closed the x4rde 2025 phantom-loss bug, added row-level
+A multi-topic day: fixed a self-transfer phantom-loss bug, added row-level
 self-transfer detection to the tax engine, built the Spec-ID lot picker UI
 all the way through, shipped Solana history import behind a whitelist-based
 spam filter, and self-hosted ethers to survive aggressive browser privacy
@@ -20,12 +20,10 @@ modes.
   (headroom for gas burn on the outbound leg). The calculator now filters
   these out before the cost-basis walker sees them, and emits a caveat
   line telling the user how many pairs were collapsed.
-  - **Regression context:** x4rde's 2025 report was showing -$377.64. Turned
-    out $126 of that was a phantom loss from a 0.1 ETH withdraw + deposit
-    34 seconds apart at identical prices, i.e. a self-transfer that the
-    walker had been happily treating as a sale at a loss. A second USDC
-    pair (~$1400) was also caught. Genuine ETH loss after filtering:
-    ~$251.
+  - **Regression context:** a test portfolio showed phantom losses from
+    wallet-to-wallet ETH and USDC moves being treated as taxable disposals.
+    The self-transfer collapser eliminates these pairs before the cost-basis
+    walker sees them.
   - Three new smoke tests in `test_tax_methods.py` lock the behaviour in:
     same-window match, cross-symbol negative (BTC withdraw ≠ ETH deposit),
     outside-window negative (2h-apart).
@@ -120,7 +118,7 @@ modes.
   `provider.connect()` stays in `pending` forever, no error, no popup.
   Localhost is the only HTTP exception. Workaround for dev: SSH tunnel
   to `localhost:8787`. Proper fix: domain + Cloudflare proxy + SSL.
-  Tracked in `Tasks/2026-04-11.md` in the obsidian vault. EVM wallet
+  EVM wallet
   linking is unaffected because MetaMask/Rabby etc. don't enforce the
   HTTPS constraint.
 
@@ -232,6 +230,4 @@ Items moved to `TODO.md` with explicit priorities:
 
 ### Docs
 
-- `CLAUDE.md` and `AGENTS.md` added at project root
-- `webapp/docs/` populated with ARCHITECTURE, SECURITY, BILLING, CHANGELOG
-- KB research notes written to `/root/obsidian-vault/KB/` (see its INDEX)
+- `docs/` populated with ARCHITECTURE, SECURITY, BILLING, CHANGELOG

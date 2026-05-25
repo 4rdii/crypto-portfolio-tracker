@@ -24,7 +24,6 @@ RUN pip install --no-cache-dir -r requirements.txt
 
 # App code.
 COPY webapp/ ./webapp/
-COPY scanner.py ./scanner.py
 
 # Runtime — uvicorn binds inside the container; Traefik forwards to :8787.
 WORKDIR /app/webapp

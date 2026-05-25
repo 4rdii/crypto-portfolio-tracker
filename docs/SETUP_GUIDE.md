@@ -210,7 +210,7 @@ pytest tests/ -v
 
 ## Architecture overview
 
-For a full technical deep-dive see `webapp/docs/`:
+For a full technical deep-dive see `docs/`:
 
 - `ARCHITECTURE.md` — system overview, data flows, threading model
 - `BILLING.md` — credit ledger math, top-up flow, treasury watcher
