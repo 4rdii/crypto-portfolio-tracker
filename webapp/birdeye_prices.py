@@ -36,7 +36,6 @@ in a loop without burning API quota on repeat imports.
 """
 from __future__ import annotations
 
-import logging
 import os
 import sqlite3
 import time
@@ -45,7 +44,7 @@ from pathlib import Path
 
 import requests
 
-log = logging.getLogger(__name__)
+from applog import log
 
 # ---------------------------------------------------------------------------
 # Environment loading — mirrors scanner.py's pattern exactly

@@ -52,7 +52,6 @@ from __future__ import annotations
 
 import argparse
 import json
-import logging
 import os
 import sys
 import time
@@ -61,7 +60,7 @@ from pathlib import Path
 
 import requests
 
-log = logging.getLogger(__name__)
+from applog import log
 
 # ---------------------------------------------------------------------------
 # Environment loading — reuse scanner.py's pattern

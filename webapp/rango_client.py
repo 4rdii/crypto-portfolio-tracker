@@ -58,7 +58,7 @@ _TOKENS: Dict[str, Dict[str, Dict]] = {
         "ETH":  {"address": "0x2170ed0880ac9a755fd29b2688956bd959f933f8",  "decimals": 18},
         "BUSD": {"address": "0xe9e7cea3dedca5984780bafc599bd69add087d56",  "decimals": 18},
     },
-    "MATIC": {
+    "POLYGON": {
         "MATIC": {"address": None,                                           "decimals": 18},
         "USDC":  {"address": "0x2791bca1f2de4661ed88a30c99a7a9449aa84174",  "decimals": 6},
         "USDT":  {"address": "0xc2132d05d31c914a87c6611c10748aeb04b58e8f",  "decimals": 6},
@@ -255,7 +255,7 @@ def quote_swap(from_token: str, to_token: str, amount: float,
             raise RangoError(f"No route found (resultType={data.get('resultType')})")
 
         route    = data["route"]
-        to_info  = _token_info(to_token)
+        to_info  = _token_info(to_token, to_chain)
         out_dec  = route.get("to", {}).get("decimals") or to_info["decimals"]
 
         return {
@@ -270,29 +270,6 @@ def quote_swap(from_token: str, to_token: str, amount: float,
     except Exception as e:
         log.error(f"Rango quote failed: {e}")
         raise RangoError(f"Failed to get quote: {str(e)}")
-
-
-def get_tokens_list(blockchain: str = "SOLANA") -> List[Dict]:
-    """
-    Get list of supported tokens on a blockchain from Rango meta endpoint.
-
-    Returns:
-        List of dicts with token metadata (symbol, address, decimals)
-    """
-    try:
-        params: Dict = {"blockchain": blockchain}
-        if RANGO_API_KEY:
-            params["apiKey"] = RANGO_API_KEY
-
-        response = requests.get(f"{RANGO_API_BASE}/basic/meta", params=params, timeout=15)
-        response.raise_for_status()
-
-        data = response.json()
-        return data.get("tokens", [])
-
-    except Exception as e:
-        log.error(f"Failed to fetch Rango tokens list: {e}")
-        return []
 
 
 # Curated list of xStocks (tokenized stocks) available on Solana
@@ -345,15 +322,6 @@ XSTOCKS_LIST = {
         "category": "Cybersecurity"
     }
 }
-
-
-def is_valid_token(symbol: str) -> bool:
-    """Check if token is valid (either crypto or xStock)."""
-    if symbol in XSTOCKS_LIST:
-        return True
-    common_tokens = ["SOL", "USDC", "USDT", "BTC", "WBTC", "ETH", "WETH",
-                     "BONK", "JUP", "RAY", "ORCA", "MNGO", "SRM"]
-    return symbol.upper() in common_tokens
 
 
 def get_xstocks_list() -> Dict:

@@ -69,7 +69,6 @@ app.add_middleware(
 )
 
 app.mount("/static", StaticFiles(directory=BASE_DIR / "static"), name="static")
-from fastapi.responses import FileResponse
 
 jinja_env = Environment(
     loader=FileSystemLoader(BASE_DIR / "templates"),
@@ -1385,7 +1384,7 @@ def api_dashboard(user_id: int = Depends(auth.require_user)):
             user_id=user_id, lookback_days=365
         )
     except Exception as e:
-        print(f"[dashboard] reconstruct_daily_history failed: {e}")
+        log.error("dashboard.reconstruct_daily_history failed user=%s: %s", user_id, e)
         daily = []
 
     if daily:
@@ -2755,16 +2754,17 @@ class RebalanceConfirm(BaseModel):
 def confirm_rebalance(body: RebalanceConfirm, user_id: int = Depends(auth.require_user)):
     """Update rebalance history with transaction hashes after execution."""
 
-    # Update the rebalance record
     with db.get_conn() as c:
-        c.execute(
+        cur = c.execute(
             """UPDATE rebalance_history
                SET tx_hashes = ?, status = ?
                WHERE id = ? AND user_id = ?""",
             (json.dumps(body.tx_hashes), body.status, body.rebalance_id, user_id)
         )
+        if cur.rowcount == 0:
+            raise HTTPException(status_code=404, detail="Rebalance execution not found")
 
-    log.info(f"User {user_id} confirmed rebalance {body.rebalance_id} with status {body.status}")
+    log.info("rebalance.confirm user=%s id=%s status=%s", user_id, body.rebalance_id, body.status)
 
     return {"success": True}
 

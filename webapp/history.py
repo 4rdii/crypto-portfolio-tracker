@@ -15,7 +15,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 import requests
 
-from scanner import ENV, _moralis_get  # reuse env loader + rotating GET wrapper
+from scanner import ENV, _moralis_get, EVM_CHAINS_EXTENDED  # reuse env loader + rotating GET wrapper
 from moralis_keys import pool_size as _moralis_pool_size
 
 # Legacy single-key var kept only for the "is any key configured?" guards
@@ -732,7 +732,7 @@ def import_wallet_history(wallet_address: str, own_addresses: set[str],
     target_chains = chains if chains else EVM_CHAINS
     # Defensive: ignore unknown chain slugs the caller may pass through from
     # a compromised / stale client. Never fetch from a chain we don't price.
-    target_chains = [c for c in target_chains if c in EVM_CHAINS]
+    target_chains = [c for c in target_chains if c in EVM_CHAINS_EXTENDED]
     if not target_chains:
         return []
     all_rows: list[dict] = []

@@ -348,7 +348,7 @@ def add_wallet(user_id: int, address: str, label: str, chain: str, verified: int
 
 
 def delete_wallet(user_id: int, wallet_id: int):
-    """Cascade-delete wallet + holdings + transactions associated with it.
+    """Cascade-delete wallet + all associated data.
     Scoped to user_id to prevent cross-tenant deletes."""
     with get_conn() as c:
         c.execute(
@@ -358,6 +358,15 @@ def delete_wallet(user_id: int, wallet_id: int):
         c.execute(
             "DELETE FROM holdings WHERE wallet_id = ? AND user_id = ?",
             (wallet_id, user_id),
+        )
+        c.execute(
+            "DELETE FROM wallet_imports WHERE wallet_id = ?",
+            (wallet_id,),
+        )
+        # Remove from fund ownership table if present (no user_id column here)
+        c.execute(
+            "DELETE FROM fund_wallet_ownership WHERE wallet_id = ?",
+            (wallet_id,),
         )
         c.execute(
             "DELETE FROM wallets WHERE id = ? AND user_id = ?",
@@ -1048,24 +1057,26 @@ def find_user_by_wallet_address(address: str) -> int | None:
 def get_preset_strategies():
     """Return all system-defined preset strategies."""
     with get_conn() as c:
-        return c.execute(
+        rows = c.execute(
             """SELECT id, name, allocations, created_at
                FROM strategies
                WHERE is_preset = 1
                ORDER BY id""",
         ).fetchall()
+        return [row_to_dict(r) for r in rows]
 
 
 def get_user_strategies(user_id: int):
     """Return all custom strategies for this user."""
     with get_conn() as c:
-        return c.execute(
+        rows = c.execute(
             """SELECT id, name, allocations, created_at, updated_at
                FROM strategies
                WHERE user_id = ? AND is_preset = 0
                ORDER BY updated_at DESC""",
             (user_id,),
         ).fetchall()
+        return [row_to_dict(r) for r in rows]
 
 
 def get_strategy(strategy_id: int, user_id: int | None = None):

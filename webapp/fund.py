@@ -74,6 +74,8 @@ def get_db():
     conn = sqlite3.connect(str(DB_PATH))
     conn.row_factory = sqlite3.Row
     conn.execute("PRAGMA journal_mode=WAL")
+    conn.execute("PRAGMA busy_timeout = 5000")
+    conn.execute("PRAGMA foreign_keys = ON")
     conn.executescript(SCHEMA)
     # Run migrations (safe to re-run — ALTER TABLE fails silently if col exists)
     for sql in MIGRATIONS:
@@ -155,23 +157,23 @@ def cmd_init(args):
         SELECT id, address, label FROM wallets WHERE user_id = 1
     """).fetchall()
 
-    # Share distribution from the Google Sheet (percentages of pooled wallets)
-    # These are the shares of the POOLED wallets only
+    # Share distribution (percentages of pooled wallets).
+    # Edit these to match your actual shareholders before running init.
+    # Example structure — replace with real names and percentages (must sum to 100).
     shareholders = {
-        "Saeid":    85.14,
-        "Ardeshir": 0.45,
-        "Kiarash":  1.74,
-        "Zahra":    2.04,
-        "Batul":    1.24,
-        "Rent":     5.59,
-        "Ebrahim":  3.81,
+        "Person1": 85.14,
+        "Person2":  0.45,
+        "Person3":  1.74,
+        "Person4":  2.04,
+        "Person5":  1.24,
+        "Expenses":  5.59,
+        "Person6":  3.81,
     }
 
-    # Personal wallets (fully owned, NOT part of the pool)
+    # Personal wallets (fully owned, NOT part of the pool).
+    # Map wallet label (lowercase) → shareholder name.
     personal_wallets = {
-        "mitra wallet": "Mitra",
-        "saeid wallet": "Saeid",
-        "rent": "Rent",
+        # "my wallet": "Person1",
     }
 
     # Classify wallets
